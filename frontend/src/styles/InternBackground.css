@@ -1,0 +1,258 @@
+/* Intern Role Atmospheric Background — "Glass + Floating Light" Visual Identity */
+
+.intern-bg-root {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  background-color: #f8fafc;
+  color: #0f172a;
+  overflow-x: hidden;
+  font-family: var(--font-family, 'Plus Jakarta Sans', sans-serif);
+}
+
+/* Base Light Foundation Gradient */
+.intern-bg-base {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(circle at 50% -10%, #f0f9ff 0%, #f8fafc 60%, #edf5fc 100%);
+  transition: background 0.8s ease;
+}
+
+/* Atmospheric Diffused Light Blooms */
+.intern-bg-light-blooms {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.intern-bloom {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.65;
+  transition: all 1s ease-in-out;
+  will-change: transform, opacity;
+}
+
+/* Primary Cyan Bloom */
+.bloom-cyan {
+  top: -140px;
+  right: -60px;
+  width: 650px;
+  height: 650px;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.32) 0%, rgba(186, 230, 253, 0.18) 50%, rgba(255, 255, 255, 0) 75%);
+  animation: floatLightBloom 22s ease-in-out infinite alternate;
+}
+
+/* Subtle Mint Glow */
+.bloom-mint {
+  bottom: 2%;
+  left: -80px;
+  width: 580px;
+  height: 580px;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.25) 0%, rgba(167, 243, 208, 0.14) 55%, rgba(255, 255, 255, 0) 80%);
+  animation: floatMintBloom 26s ease-in-out infinite alternate;
+}
+
+/* Sky Blue Ambient Fill */
+.bloom-sky {
+  top: 35%;
+  right: 12%;
+  width: 520px;
+  height: 520px;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.2) 0%, rgba(224, 242, 254, 0.12) 60%, rgba(255, 255, 255, 0) 80%);
+  animation: floatSkyBloom 24s ease-in-out infinite alternate;
+}
+
+/* Top Soft Aura */
+.bloom-top-aura {
+  top: 0;
+  left: 15%;
+  width: 800px;
+  height: 400px;
+  background: radial-gradient(ellipse at top, rgba(125, 211, 252, 0.28) 0%, rgba(240, 249, 255, 0) 70%);
+}
+
+/* Overlapping Translucent Depth Layer */
+.intern-bg-depth-forms {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.intern-shape {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.12) 0%, rgba(224, 242, 254, 0.05) 60%, transparent 80%);
+  opacity: 0.35;
+  transition: all 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.shape-orb-1 {
+  top: 15%;
+  left: 6%;
+  width: 280px;
+  height: 280px;
+  animation: floatSoftShape1 18s ease-in-out infinite alternate;
+}
+
+.shape-orb-2 {
+  bottom: 8%;
+  right: 4%;
+  width: 340px;
+  height: 340px;
+  animation: floatSoftShape2 24s ease-in-out infinite alternate;
+}
+
+.shape-pill-1 {
+  top: 50%;
+  left: -50px;
+  width: 300px;
+  height: 150px;
+  border-radius: 100px;
+  transform: rotate(-15deg);
+  animation: floatSoftShape3 20s ease-in-out infinite alternate;
+}
+
+/* Content Container */
+.intern-bg-content {
+  position: relative;
+  z-index: 10;
+  min-height: 100vh;
+  padding-bottom: 120px;
+}
+
+/* Page-aware Variations */
+
+/* Dashboard: Bright, open, balanced */
+.intern-bg-variant-dashboard .bloom-cyan {
+  opacity: 0.65;
+}
+
+/* Explore: Spacious, luminous, atmospheric discovery focus */
+.intern-bg-variant-explore .intern-bg-base {
+  background: radial-gradient(circle at 50% 0%, #e0f2fe 0%, #f0f9ff 45%, #f8fafc 85%);
+}
+
+.intern-bg-variant-explore .bloom-cyan {
+  opacity: 0.85;
+  top: -120px;
+  right: -40px;
+  width: 780px;
+  height: 780px;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.42) 0%, rgba(186, 230, 253, 0.25) 50%, rgba(255, 255, 255, 0) 75%);
+}
+
+.intern-bg-variant-explore .bloom-sky {
+  opacity: 0.7;
+  top: 15%;
+  left: -80px;
+  width: 760px;
+  height: 760px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.22) 0%, rgba(224, 242, 254, 0.2) 60%, rgba(255, 255, 255, 0) 80%);
+}
+
+.intern-bg-variant-explore .bloom-mint {
+  opacity: 0.6;
+  bottom: 0%;
+  right: -50px;
+  width: 700px;
+  height: 700px;
+}
+
+.intern-bg-variant-explore .shape-orb-1 {
+  opacity: 0.8;
+  width: 280px;
+  height: 280px;
+}
+
+.intern-bg-variant-explore .shape-orb-2 {
+  opacity: 0.8;
+  width: 360px;
+  height: 360px;
+}
+
+/* Details: Calmer and clear */
+.intern-bg-variant-details .bloom-mint {
+  opacity: 0.35;
+}
+
+/* Apply: Focused and clean */
+.intern-bg-variant-apply .bloom-cyan {
+  opacity: 0.5;
+}
+
+/* Submitted: Bright and positive */
+.intern-bg-variant-submitted .bloom-mint {
+  opacity: 0.65;
+  transform: scale(1.2);
+}
+
+/* Tracking: Balanced and clear */
+.intern-bg-variant-track .bloom-sky {
+  opacity: 0.45;
+}
+
+/* Assessment: Calmest version for max focus */
+.intern-bg-variant-assessment .intern-bloom {
+  opacity: 0.2 !important;
+  filter: blur(130px) !important;
+  animation-play-state: paused !important;
+}
+
+.intern-bg-variant-assessment .intern-shape {
+  opacity: 0.18 !important;
+  animation-play-state: paused !important;
+}
+
+/* Interview: Clean, bright, spacious */
+.intern-bg-variant-interview .bloom-top-aura {
+  opacity: 0.75;
+}
+
+/* Atmospheric Keyframe Animations */
+@keyframes floatLightBloom {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-40px, 50px) scale(1.08); }
+}
+
+@keyframes floatMintBloom {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(45px, -35px) scale(1.06); }
+}
+
+@keyframes floatSkyBloom {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-30px, -40px) scale(1.1); }
+}
+
+@keyframes floatSoftShape1 {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  100% { transform: translate(25px, 35px) rotate(10deg); }
+}
+
+@keyframes floatSoftShape2 {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  100% { transform: translate(-35px, -25px) rotate(-8deg); }
+}
+
+@keyframes floatSoftShape3 {
+  0% { transform: translate(0, 0) rotate(-15deg); }
+  100% { transform: translate(30px, -20px) rotate(-5deg); }
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+  .intern-bloom,
+  .intern-shape {
+    animation: none !important;
+    transition: none !important;
+  }
+}

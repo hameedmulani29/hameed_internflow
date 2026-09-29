@@ -1,0 +1,57 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.applications.router import router as applications_router
+from app.assessments.router import router as assessments_router
+from app.attendance.router import router as attendance_router
+from app.auth.router import router as auth_router
+from app.core.config import CORS_ORIGINS
+from app.core.logging_middleware import StructuredLoggingMiddleware
+from app.core.rate_limiter import SimpleRateLimiterMiddleware
+from app.db import init_db
+from app.evidence.router import router as evidence_router
+from app.goals.router import router as goals_router
+from app.interns.router import router as interns_router
+from app.internships.router import router as internships_router
+from app.interviews.router import router as interviews_router
+from app.mentor_feedback.router import router as mentor_feedback_router
+from app.mentors.router import router as mentor_router, mentor_websocket
+from app.notifications.router import router as notifications_router
+from app.outcomes.router import router as outcomes_router
+from app.progress.router import router as progress_router
+from app.skills.router import router as skills_router
+
+app = FastAPI(title='InternFlow API', version='1.0.0')
+
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
+app.add_middleware(StructuredLoggingMiddleware)
+app.add_middleware(SimpleRateLimiterMiddleware, requests_per_minute=120)
+
+app.include_router(auth_router)
+app.include_router(internships_router)
+app.include_router(applications_router)
+app.include_router(interns_router)
+app.include_router(attendance_router)
+app.include_router(mentor_router)
+app.include_router(mentor_feedback_router)
+app.include_router(skills_router)
+app.include_router(notifications_router)
+app.include_router(assessments_router)
+app.include_router(interviews_router)
+app.include_router(goals_router)
+app.include_router(evidence_router)
+app.include_router(outcomes_router)
+app.include_router(progress_router)
+
+# Mount alias for /api/ws/mentor
+app.websocket('/api/ws/mentor')(mentor_websocket)
+
+
+@app.on_event('startup')
+def startup():
+    init_db()
+
+
+@app.get('/api/health')
+def health():
+    return {'status': 'ok'}

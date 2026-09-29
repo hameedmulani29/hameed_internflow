@@ -1,0 +1,226 @@
+/* Intern Role Navigation Orb — Perfect Circular Alignment & "Your Journey" Tag */
+
+.intern-orb-wrapper {
+  position: fixed;
+  z-index: 9999;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: transform 0.05s linear;
+}
+
+.intern-orb-wrapper.is-dragging {
+  cursor: grabbing !important;
+}
+
+.perfect-circular-orb-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  position: relative;
+  z-index: 10;
+}
+
+/* Primary PERFECT CIRCULAR Floating Orb Trigger Button (1:1 Aspect Ratio Circle) */
+.circular-orb-trigger {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(224, 242, 254, 0.88) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 14px 36px rgba(14, 165, 233, 0.28), 0 4px 12px rgba(15, 23, 42, 0.08);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+  flex-shrink: 0;
+}
+
+.circular-orb-trigger:hover {
+  transform: scale(1.08);
+  box-shadow: 0 20px 44px rgba(14, 165, 233, 0.38);
+  border-color: #ffffff;
+}
+
+.circular-orb-trigger.open {
+  background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
+  border-color: rgba(255, 255, 255, 0.95);
+  color: #ffffff;
+}
+
+.orb-trigger-glow {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.45) 0%, rgba(255, 255, 255, 0) 70%);
+  filter: blur(10px);
+  animation: orbGlowPulse 3.5s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+.orb-icon-inner {
+  position: relative;
+  z-index: 2;
+  color: #0284c7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s ease;
+}
+
+.circular-orb-trigger.open .orb-icon-inner {
+  color: #ffffff;
+  transform: rotate(90deg);
+}
+
+.orb-status-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background-color: #10b981;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.7);
+}
+
+/* Attached "Your Journey" Glass Label Tag */
+.your-journey-tag {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  padding: 0.25rem 0.75rem;
+  border-radius: 50px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.circular-orb-trigger.open + .your-journey-tag {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+}
+
+/* Radial Circular Menu Ring Center Container */
+.radial-circular-ring {
+  position: absolute;
+  top: 36px;
+  left: 36px;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.radial-node-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center center;
+}
+
+.animate-radial-ring-pop {
+  animation: radialRingPop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.radial-circle-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(14, 165, 233, 0.2);
+  transition: all 0.22s ease;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.radial-circle-btn:hover {
+  transform: scale(1.15);
+  box-shadow: 0 14px 30px rgba(14, 165, 233, 0.35);
+}
+
+.radial-circle-btn.active {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.25), 0 10px 24px rgba(2, 132, 199, 0.3);
+}
+
+/* Color Themes */
+.radial-cyan { background: rgba(224, 242, 254, 0.94); color: #0284c7; }
+.radial-mint { background: rgba(209, 250, 229, 0.94); color: #059669; }
+.radial-amber { background: rgba(254, 243, 199, 0.94); color: #d97706; }
+.radial-indigo { background: rgba(224, 231, 255, 0.94); color: #4f46e5; }
+.radial-purple { background: rgba(250, 232, 255, 0.94); color: #c026d3; }
+.radial-teal { background: rgba(204, 251, 241, 0.94); color: #0d9488; }
+.radial-danger { background: rgba(254, 226, 226, 0.94); color: #ef4444; }
+
+/* Explicit Section Name Tags Centered Under Icon */
+.radial-section-tag {
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
+  padding: 0.2rem 0.6rem;
+  border-radius: 50px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.1);
+  white-space: nowrap;
+  text-align: center;
+}
+
+.radial-section-tag.active-tag {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+}
+
+.radial-section-tag.tag-danger {
+  color: #ef4444;
+}
+
+@keyframes radialRingPop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes orbGlowPulse {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+}

@@ -1,0 +1,888 @@
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  Compass,
+  FileCheck,
+  ArrowRight,
+  Clock,
+  Building2,
+  CheckCircle2,
+  MapPin,
+  Calendar,
+  AlertTriangle,
+  FolderKanban,
+  MessageSquare,
+  Play,
+  X,
+} from 'lucide-react';
+import { getSession } from '../../services/publicExperience';
+import {
+  fetchLiveInternships,
+  formatBackendInternship,
+  fetchMyApplications,
+  fetchInternWorkspace,
+  fetchInternAttendanceToday,
+  submitInternTask,
+  updateInternTaskStatus,
+  checkInInternAttendance,
+  checkOutInternAttendance,
+} from '../../services/internService';
+import { subscribeToInternships } from '../../services/realtimeService';
+import { fetchUnreadFeedback, markFeedbackAsRead } from '../../services/mentorFeedbackService';
+import FeedbackNotificationModal from '../../components/intern/FeedbackNotificationModal';
+import '../../styles/InternWorkspace.css';
+
+function formatMinutes(totalMinutes) {
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return '0h 0m';
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${minutes}m`;
+}
+
+/* Presentation labels for the authoritative backend lifecycle states. */
+const APP_STATUS_LABELS = {
+  applied: 'Applied',
+  screening: 'AI Screening',
+  shortlisted: 'Shortlisted',
+  assessment: 'Assessment',
+  interview: 'Interview',
+  selected: 'Selected',
+  rejected: 'Not Selected',
+};
+
+export default function InternDashboardPage({ onNavigate }) {
+  const [session, setSession] = useState(null);
+  const [internships, setInternships] = useState([]);
+  const [isLoadingInternships, setIsLoadingInternships] = useState(true);
+  const [applications, setApplications] = useState([]);
+  const [isLoadingApplications, setIsLoadingApplications] = useState(true);
+  const [workspace, setWorkspace] = useState(null);
+  const [tasks, setTasks] = useState([]);
+  const [attendanceItems, setAttendanceItems] = useState([]);
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
+
+  // Filter and Detail Modals
+  const [filterCategory, setFilterCategory] = useState('all'); // 'all' | 'today' | 'upcoming' | 'overdue' | 'submitted' | 'completed'
+  const [selectedDetailTask, setSelectedDetailTask] = useState(null);
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [taskDraft, setTaskDraft] = useState({ taskId: '', content: '', repo_url: '', demo_url: '', notes: '' });
+  const [isSubmittingTask, setIsSubmittingTask] = useState(false);
+  const [taskError, setTaskError] = useState('');
+  const [attendanceBusy, setAttendanceBusy] = useState(false);
+  const [attendanceMessage, setAttendanceMessage] = useState('');
+  const [clockTick, setClockTick] = useState(() => Date.now());
+
+  // Unread Feedback Popup State
+  const [unreadFeedbackItems, setUnreadFeedbackItems] = useState([]);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+
+  const loadUnreadFeedback = async () => {
+    try {
+      const res = await fetchUnreadFeedback();
+      const items = Array.isArray(res?.items) ? res.items : [];
+      setUnreadFeedbackItems(items);
+      if (items.length > 0) {
+        setShowFeedbackModal(true);
+      }
+    } catch {
+      setUnreadFeedbackItems([]);
+      setShowFeedbackModal(false);
+    }
+  };
+
+  const loadWorkspace = async () => {
+    try {
+      const result = await fetchInternWorkspace();
+      setWorkspace(result);
+      setTasks(result?.tasks || []);
+      if (result?.tasks?.length && !taskDraft.taskId) {
+        setTaskDraft((current) => ({ ...current, taskId: String(result.tasks[0].id) }));
+      }
+    } catch {
+      setWorkspace(null);
+      setTasks([]);
+    } finally {
+      setIsLoadingWorkspace(false);
+    }
+  };
+
+  const loadAttendance = async () => {
+    try {
+      const result = await fetchInternAttendanceToday();
+      setAttendanceItems(result?.items || []);
+    } catch {
+      setAttendanceItems([]);
+    }
+  };
+
+  const loadApplications = async () => {
+    try {
+      const items = await fetchMyApplications();
+      setApplications(Array.isArray(items) ? items : []);
+    } catch {
+      setApplications([]);
+    } finally {
+      setIsLoadingApplications(false);
+    }
+  };
+
+  const loadLiveInternships = async () => {
+    try {
+      const items = await fetchLiveInternships();
+      setInternships(items);
+    } catch {
+      setInternships([]);
+    } finally {
+      setIsLoadingInternships(false);
+    }
+  };
+
+  useEffect(() => {
+    Promise.resolve().then(() => {
+      const sessionData = getSession();
+      setSession(sessionData);
+      loadWorkspace();
+      loadAttendance();
+      loadApplications();
+      loadLiveInternships();
+      loadUnreadFeedback();
+    });
+
+    const unsubscribe = subscribeToInternships({
+      onInternshipPublished: (incoming) => {
+        const formatted = formatBackendInternship(incoming);
+        if (!formatted) return;
+
+        setInternships((prev) => {
+          const exists = prev.some((item) => String(item.id) === String(formatted.id));
+          if (exists) {
+            return prev.map((item) => (String(item.id) === String(formatted.id) ? { ...item, ...formatted } : item));
+          }
+          return [formatted, ...prev];
+        });
+      },
+      onReconnect: () => {
+        loadLiveInternships();
+      },
+    });
+
+    const timer = setInterval(() => setClockTick(Date.now()), 60000);
+    return () => {
+      unsubscribe();
+      clearInterval(timer);
+    };
+  }, []);
+
+  const userName = session?.user?.full_name || 'Intern Candidate';
+  const primaryApp = applications[0] || null;
+  const activeAttendance = attendanceItems.find((entry) => entry.status === 'checked_in') || null;
+  const elapsedMinutes = activeAttendance
+    ? Math.max(0, Math.round((clockTick - new Date(activeAttendance.checked_in_at).getTime()) / 60000))
+    : 0;
+  const todayWorkMinutes = attendanceItems.reduce((total, entry) => total + (entry.work_minutes || 0), 0) + elapsedMinutes;
+  const attendanceStatus = activeAttendance ? 'checked_in' : 'checked_out';
+
+  const handleAttendanceToggle = async () => {
+    setAttendanceBusy(true);
+    setAttendanceMessage('');
+    try {
+      const result = attendanceStatus === 'checked_in'
+        ? await checkOutInternAttendance('Checked out after work session.')
+        : await checkInInternAttendance('Checked in for the workday.');
+      setAttendanceMessage(result.status === 'checked_in' ? 'Checked in successfully.' : 'Checked out successfully.');
+      await loadAttendance();
+    } catch (error) {
+      setAttendanceMessage(error.message || 'Unable to update attendance right now.');
+    } finally {
+      setAttendanceBusy(false);
+    }
+  };
+
+  const handleTaskSubmit = async (event) => {
+    event.preventDefault();
+    if (!taskDraft.taskId) {
+      setTaskError('Please select a task to submit.');
+      return;
+    }
+    if (!taskDraft.content.trim() || taskDraft.content.trim().length < 10) {
+      setTaskError('Please write at least 10 characters summarizing your work.');
+      return;
+    }
+
+    setIsSubmittingTask(true);
+    setTaskError('');
+    try {
+      await submitInternTask(Number(taskDraft.taskId), {
+        content: taskDraft.content.trim(),
+        repo_url: taskDraft.repo_url.trim() || undefined,
+        demo_url: taskDraft.demo_url.trim() || undefined,
+        notes: taskDraft.notes.trim() || undefined,
+      });
+      setShowTaskModal(false);
+      setSelectedDetailTask(null);
+      setTaskDraft({ taskId: '', content: '', repo_url: '', demo_url: '', notes: '' });
+      await loadWorkspace();
+    } catch (error) {
+      setTaskError(error.message || 'Failed to submit task. Please check your network connection.');
+    } finally {
+      setIsSubmittingTask(false);
+    }
+  };
+
+  const handleTaskStatusUpdate = async (taskId, newStatus) => {
+    try {
+      await updateInternTaskStatus(taskId, newStatus);
+      await loadWorkspace();
+    } catch (error) {
+      console.error('Failed to update task status:', error);
+    }
+  };
+
+  // Date categorization & task grouping
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const activeTasks = tasks.filter((t) => ['assigned', 'in_progress', 'changes_requested'].includes(t.status));
+  const overdueTasks = activeTasks.filter((t) => t.due_date && t.due_date < todayStr);
+  const todayTasks = activeTasks.filter(
+    (t) => !overdueTasks.includes(t) && (!t.start_date || t.start_date <= todayStr)
+  );
+  const upcomingTasks = activeTasks
+    .filter((t) => t.start_date && t.start_date > todayStr)
+    .sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
+  const submittedTasks = tasks.filter((t) => t.status === 'submitted');
+  const completedTasks = tasks.filter((t) => t.status === 'completed');
+
+  // Filtered task view
+  let displayedTasks = tasks;
+  if (filterCategory === 'today') displayedTasks = todayTasks;
+  else if (filterCategory === 'overdue') displayedTasks = overdueTasks;
+  else if (filterCategory === 'upcoming') displayedTasks = upcomingTasks;
+  else if (filterCategory === 'submitted') displayedTasks = submittedTasks;
+  else if (filterCategory === 'completed') displayedTasks = completedTasks;
+
+  return (
+    <div className="intern-dashboard-page animate-fade-in">
+      {/* Header Banner */}
+      <section className="dashboard-hero-banner glass-panel">
+        <div className="hero-welcome-info">
+          <div className="welcome-avatar-orb">
+            <span>{userName.slice(0, 2).toUpperCase()}</span>
+          </div>
+          <div>
+            <h1 className="hero-greeting-title">Welcome back, {userName}! 👋</h1>
+            <p className="hero-greeting-subtitle">
+              {workspace?.internship?.title
+                ? `Active Intern at ${workspace.internship.department || 'Engineering'} · Mentor: ${workspace.mentor?.name || 'Assigned'}`
+                : isLoadingApplications
+                ? 'Loading your application status…'
+                : primaryApp
+                ? `Application Status: ${APP_STATUS_LABELS[primaryApp.status] || primaryApp.status}`
+                : 'Explore active internships and manage your daily deliverables.'}
+            </p>
+          </div>
+        </div>
+
+        {workspace && (
+          <div className="hero-action-pills" style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              className={`btn btn-sm ${attendanceStatus === 'checked_in' ? 'btn-success' : 'btn-primary'}`}
+              onClick={handleAttendanceToggle}
+              disabled={attendanceBusy}
+            >
+              <Clock size={14} />
+              <span>{attendanceStatus === 'checked_in' ? 'Check Out' : 'Check In'}</span>
+            </button>
+            <span className="tag-pill" style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}>
+              Today: {formatMinutes(todayWorkMinutes)}
+            </span>
+          </div>
+        )}
+      </section>
+
+      {attendanceMessage && (
+        <div className="alert-banner info animate-fade-in" style={{ marginTop: '0.5rem' }}>
+          <span>{attendanceMessage}</span>
+        </div>
+      )}
+
+      {/* Main Execution Workspace & Tasks Section */}
+      <section className="dashboard-section" style={{ marginTop: '1.5rem' }}>
+        <div className="glass-card" style={{ padding: '1.25rem' }}>
+          <div className="section-header" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div>
+              <h2 className="section-title" style={{ fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <FolderKanban size={20} className="text-cyan" />
+                Intern Execution Workspace
+              </h2>
+              <p className="section-subtitle">Your daily deliverables, upcoming workload, and mentor reviews</p>
+            </div>
+
+            {/* Filter Pills */}
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              {[
+                { id: 'all', label: `All (${tasks.length})` },
+                { id: 'today', label: `Today's (${todayTasks.length})` },
+                { id: 'overdue', label: `Overdue (${overdueTasks.length})` },
+                { id: 'upcoming', label: `Upcoming (${upcomingTasks.length})` },
+                { id: 'submitted', label: `In Review (${submittedTasks.length})` },
+                { id: 'completed', label: `Completed (${completedTasks.length})` },
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  className={`btn btn-xs ${filterCategory === f.id ? 'btn-primary' : 'btn-subtle'}`}
+                  onClick={() => setFilterCategory(f.id)}
+                  style={{ borderRadius: '20px', padding: '0.3rem 0.75rem', fontSize: '0.78rem' }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {isLoadingWorkspace ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>
+              <p className="card-desc-snippet">Loading your workspace & task schedule...</p>
+            </div>
+          ) : tasks.length === 0 ? (
+            <div className="empty-state-card" style={{ padding: '2rem', textAlign: 'center' }}>
+              <Compass size={36} className="text-cyan" style={{ marginBottom: '0.5rem' }} />
+              <h3>No tasks assigned yet</h3>
+              <p style={{ color: '#94a3b8', fontSize: '0.9rem' }}>
+                Once your provider assigns a mentor and project, your daily chunks and task schedule will appear here.
+              </p>
+            </div>
+          ) : filterCategory !== 'all' ? (
+            /* Filtered View */
+            <div style={{ display: 'grid', gap: '0.9rem' }}>
+              {displayedTasks.length === 0 ? (
+                <p className="card-desc-snippet" style={{ fontStyle: 'italic', padding: '1rem' }}>
+                  No tasks matching the '{filterCategory}' filter.
+                </p>
+              ) : (
+                displayedTasks.map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onOpenDetails={() => setSelectedDetailTask(task)}
+                    onStart={() => handleTaskStatusUpdate(task.id, 'in_progress')}
+                    onSubmitWork={() => {
+                      setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                      setShowTaskModal(true);
+                    }}
+                  />
+                ))
+              )}
+            </div>
+          ) : (
+            /* Categorized Multi-Section View */
+            <div style={{ display: 'grid', gap: '1.5rem' }}>
+              {/* SECTION 1: OVERDUE TASKS (if any exist) */}
+              {overdueTasks.length > 0 && (
+                <div style={{ border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: '14px', padding: '1rem', background: 'rgba(239, 68, 68, 0.05)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    <AlertTriangle size={18} style={{ color: '#dc2626' }} />
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#dc2626', fontWeight: 700 }}>Overdue Tasks ({overdueTasks.length})</h3>
+                  </div>
+                  <div style={{ display: 'grid', gap: '0.75rem' }}>
+                    {overdueTasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        isOverdue
+                        onOpenDetails={() => setSelectedDetailTask(task)}
+                        onStart={() => handleTaskStatusUpdate(task.id, 'in_progress')}
+                        onSubmitWork={() => {
+                          setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                          setShowTaskModal(true);
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 2: TODAY'S TASKS */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <Calendar size={18} style={{ color: '#0284c7' }} />
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a', fontWeight: 700 }}>Today's Tasks ({todayTasks.length})</h3>
+                </div>
+                {todayTasks.length === 0 ? (
+                  <p className="card-desc-snippet" style={{ fontStyle: 'italic', padding: '0.5rem' }}>
+                    No active tasks scheduled for today. Check your upcoming tasks below.
+                  </p>
+                ) : (
+                  <div style={{ display: 'grid', gap: '0.75rem' }}>
+                    {todayTasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        isToday
+                        onOpenDetails={() => setSelectedDetailTask(task)}
+                        onStart={() => handleTaskStatusUpdate(task.id, 'in_progress')}
+                        onSubmitWork={() => {
+                          setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                          setShowTaskModal(true);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 3: UPCOMING TASKS */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <Clock size={18} style={{ color: '#4f46e5' }} />
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a', fontWeight: 700 }}>Upcoming Tasks ({upcomingTasks.length})</h3>
+                </div>
+                {upcomingTasks.length === 0 ? (
+                  <p className="card-desc-snippet" style={{ fontStyle: 'italic', padding: '0.5rem' }}>
+                    No upcoming tasks scheduled yet.
+                  </p>
+                ) : (
+                  <div style={{ display: 'grid', gap: '0.75rem' }}>
+                    {upcomingTasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        onOpenDetails={() => setSelectedDetailTask(task)}
+                        onStart={() => handleTaskStatusUpdate(task.id, 'in_progress')}
+                        onSubmitWork={() => {
+                          setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                          setShowTaskModal(true);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 4: IN REVIEW / SUBMITTED */}
+              {submittedTasks.length > 0 && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    <FileCheck size={18} style={{ color: '#d97706' }} />
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a', fontWeight: 700 }}>Awaiting Mentor Review ({submittedTasks.length})</h3>
+                  </div>
+                  <div style={{ display: 'grid', gap: '0.75rem' }}>
+                    {submittedTasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        onOpenDetails={() => setSelectedDetailTask(task)}
+                        onSubmitWork={() => {
+                          setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                          setShowTaskModal(true);
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 5: COMPLETED TASKS */}
+              {completedTasks.length > 0 && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    <CheckCircle2 size={18} style={{ color: '#16a34a' }} />
+                    <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a', fontWeight: 700 }}>Completed Tasks ({completedTasks.length})</h3>
+                  </div>
+                  <div style={{ display: 'grid', gap: '0.75rem' }}>
+                    {completedTasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        onOpenDetails={() => setSelectedDetailTask(task)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* TASK DETAIL MODAL */}
+      {selectedDetailTask && (
+        <TaskDetailModal
+          task={selectedDetailTask}
+          onClose={() => setSelectedDetailTask(null)}
+          onStart={() => {
+            handleTaskStatusUpdate(selectedDetailTask.id, 'in_progress');
+            setSelectedDetailTask(null);
+          }}
+          onSubmitOpen={() => {
+            setTaskDraft((curr) => ({ ...curr, taskId: String(selectedDetailTask.id) }));
+            setShowTaskModal(true);
+          }}
+        />
+      )}
+
+      {/* TASK SUBMISSION MODAL */}
+      {showTaskModal && typeof document !== 'undefined' && createPortal(
+        <div className="modal-backdrop" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: 'rgba(8, 12, 24, 0.75)', backdropFilter: 'blur(8px)', display: 'grid', placeItems: 'center', zIndex: 99999 }} onClick={() => setShowTaskModal(false)}>
+          <div className="glass-card" style={{ width: 'min(640px, calc(100vw - 2rem))', padding: '1.5rem', background: '#ffffff', color: '#0f172a', border: '1px solid #e2e8f0', boxShadow: '0 20px 30px rgba(0,0,0,0.25)', borderRadius: '16px' }} onClick={(event) => event.stopPropagation()}>
+            <div className="section-header" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 className="section-title" style={{ fontSize: '1.2rem', color: '#0f172a' }}>Submit Task Work</h3>
+                <p className="section-subtitle" style={{ color: '#64748b' }}>Share progress, repository links, and notes for your mentor.</p>
+              </div>
+              <button type="button" onClick={() => setShowTaskModal(false)} style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+
+            <form onSubmit={handleTaskSubmit}>
+              <div style={{ display: 'grid', gap: '0.9rem' }}>
+                <label style={{ display: 'grid', gap: '0.3rem' }}>
+                  <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Task *</span>
+                  <select value={taskDraft.taskId} onChange={(event) => setTaskDraft((current) => ({ ...current, taskId: event.target.value }))} style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem' }}>
+                    {tasks.map((task) => (
+                      <option key={task.id} value={String(task.id)}>{task.title} ({task.status})</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: 'grid', gap: '0.3rem' }}>
+                  <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Summary *</span>
+                  <textarea value={taskDraft.content} onChange={(event) => setTaskDraft((current) => ({ ...current, content: event.target.value }))} rows={5} placeholder="Describe what you completed, implementation details, and outcomes of this task." style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem', resize: 'vertical' }} />
+                </label>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.9rem' }}>
+                  <label style={{ display: 'grid', gap: '0.3rem' }}>
+                    <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Repository URL</span>
+                    <input value={taskDraft.repo_url} onChange={(event) => setTaskDraft((current) => ({ ...current, repo_url: event.target.value }))} placeholder="https://github.com/your-repo" style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem' }} />
+                  </label>
+                  <label style={{ display: 'grid', gap: '0.3rem' }}>
+                    <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Demo URL</span>
+                    <input value={taskDraft.demo_url} onChange={(event) => setTaskDraft((current) => ({ ...current, demo_url: event.target.value }))} placeholder="https://demo.example.com" style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem' }} />
+                  </label>
+                </div>
+
+                <label style={{ display: 'grid', gap: '0.3rem' }}>
+                  <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Notes / Follow-ups</span>
+                  <textarea value={taskDraft.notes} onChange={(event) => setTaskDraft((current) => ({ ...current, notes: event.target.value }))} rows={2} placeholder="Add any context or questions for your mentor." style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem', resize: 'vertical' }} />
+                </label>
+              </div>
+
+              {taskError && <p style={{ color: '#dc2626', marginTop: '0.75rem', fontSize: '0.85rem' }}>{taskError}</p>}
+
+              <div className="card-footer-actions" style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button type="button" className="btn btn-subtle btn-sm" onClick={() => setShowTaskModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={isSubmittingTask}>
+                  {isSubmittingTask ? 'Submitting...' : 'Submit Deliverable'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Live Internship Recommendations */}
+      <section className="dashboard-section" style={{ marginTop: '2rem' }}>
+        <div className="section-header">
+          <div>
+            <h2 className="section-title">Live Internship Openings</h2>
+            <p className="section-subtitle">Published by verified providers on InternFlow right now</p>
+          </div>
+          <button className="btn btn-sm btn-outline" onClick={() => onNavigate('/intern/explore')}>
+            <span>View All ({internships.length})</span>
+            <ArrowRight size={14} />
+          </button>
+        </div>
+
+        {isLoadingInternships ? (
+          <div className="internships-grid">
+            {[0, 1, 2].map((idx) => (
+              <div key={idx} className="glass-card internship-card">
+                <div className="skeleton-line" style={{ width: '70%' }} />
+                <div className="skeleton-line" style={{ width: '45%' }} />
+                <div className="skeleton-line" style={{ width: '90%' }} />
+              </div>
+            ))}
+          </div>
+        ) : internships.length === 0 ? (
+          <div className="glass-card empty-state-card animate-fade-in">
+            <Compass size={40} className="empty-icon text-cyan" />
+            <h3>No openings published yet</h3>
+            <p>Providers publish internships here the moment they go live — check back soon.</p>
+            <button className="btn btn-outline" onClick={() => onNavigate('/intern/explore')}>
+              <Compass size={16} />
+              <span>Open Discovery Hub</span>
+            </button>
+          </div>
+        ) : (
+          <div className="internships-grid">
+            {internships.slice(0, 3).map((item) => (
+              <div key={item.id} className="glass-card internship-card">
+                <div className="card-top">
+                  <div className="card-company-icon">
+                    <Building2 size={20} />
+                  </div>
+                  {item.formattedCreatedAt && (
+                    <span className="tag-pill" title={item.createdAt ? `Posted: ${item.createdAt}` : ''}>
+                      <Calendar size={11} className="text-cyan" /> {item.formattedCreatedAt}
+                    </span>
+                  )}
+                </div>
+
+                <h3 className="card-job-title">{item.title}</h3>
+                <p className="card-company-name">{item.company}</p>
+                <p className="card-desc-snippet">{item.description}</p>
+
+                <div className="card-meta-tags">
+                  <span className="tag-pill">
+                    <MapPin size={12} />
+                    {item.workMode}
+                  </span>
+                  <span className="tag-pill">
+                    <Clock size={12} />
+                    {item.duration}
+                  </span>
+                  <span className="tag-pill stipend-pill">{item.stipend}</span>
+                </div>
+
+                {item.skills.length > 0 && (
+                  <div className="card-skills-row">
+                    {item.skills.map((skill) => (
+                      <span key={skill} className="skill-chip">
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="card-footer-actions">
+                  <button
+                    className="btn btn-outline btn-sm full-width"
+                    onClick={() => onNavigate(`/intern/internships/${item.id}`)}
+                  >
+                    <span>View Details</span>
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* UNREAD MENTOR FEEDBACK NOTIFICATION MODAL */}
+      {showFeedbackModal && unreadFeedbackItems.length > 0 && (
+        <FeedbackNotificationModal
+          unreadItems={unreadFeedbackItems}
+          onClose={() => setShowFeedbackModal(false)}
+          onMarkRead={async (feedbackId) => {
+            await markFeedbackAsRead(feedbackId);
+            setUnreadFeedbackItems((prev) => prev.filter((item) => item.id !== feedbackId));
+          }}
+          onViewFeedback={() => {
+            setShowFeedbackModal(false);
+            if (onNavigate) {
+              onNavigate('/intern/mentor-feedback');
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function TaskCard({ task, isOverdue, isToday, onOpenDetails, onStart, onSubmitWork }) {
+  const priorityColor = task.priority === 'high' ? '#dc2626' : task.priority === 'low' ? '#64748b' : '#0284c7';
+
+  return (
+    <div
+      style={{
+        border: isOverdue ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid rgba(226, 232, 240, 0.9)',
+        borderRadius: '14px',
+        padding: '1.1rem',
+        background: isOverdue ? 'rgba(254, 242, 242, 0.85)' : 'rgba(255, 255, 255, 0.85)',
+        boxShadow: '0 4px 12px rgba(15, 23, 42, 0.03)',
+        transition: 'all 0.2s ease',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
+            <h4 style={{ margin: 0, fontSize: '1.02rem', color: '#0f172a', fontWeight: 700 }}>{task.title}</h4>
+            {isToday && <span style={{ background: '#e0f2fe', color: '#0284c7', fontSize: '0.68rem', padding: '2px 8px', borderRadius: '12px', fontWeight: 700 }}>TODAY</span>}
+            {isOverdue && <span style={{ background: '#fef2f2', color: '#dc2626', fontSize: '0.68rem', padding: '2px 8px', borderRadius: '12px', fontWeight: 700 }}>OVERDUE</span>}
+          </div>
+          <p style={{ margin: 0, color: '#475569', fontSize: '0.88rem', lineClamp: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {task.description}
+          </p>
+        </div>
+        <span className="badge badge-primary" style={{ textTransform: 'capitalize' }}>
+          {task.status === 'changes_requested' ? 'Changes Requested' : task.status}
+        </span>
+      </div>
+
+      {/* DIRECT MENTOR FEEDBACK / CHANGES REQUESTED BOX ON TASK CARD */}
+      {task.mentor_feedback && (
+        <div style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '10px', background: task.status === 'changes_requested' ? '#fff7ed' : '#eef2ff', border: task.status === 'changes_requested' ? '1px solid #fed7aa' : '1px solid #c7d2fe' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.25rem' }}>
+            <MessageSquare size={14} style={{ color: task.status === 'changes_requested' ? '#ea580c' : '#4f46e5' }} />
+            <strong style={{ fontSize: '0.82rem', color: task.status === 'changes_requested' ? '#c2410c' : '#3730a3' }}>
+              {task.status === 'changes_requested' ? 'Changes Requested by Mentor' : 'Mentor Feedback'}
+            </strong>
+          </div>
+          <p style={{ margin: 0, fontSize: '0.84rem', color: '#1e293b', fontStyle: 'italic', lineHeight: 1.4 }}>
+            "{task.mentor_feedback.feedback}"
+          </p>
+          {task.mentor_feedback.strengths && (
+            <div style={{ marginTop: '0.3rem', fontSize: '0.78rem', color: '#15803d' }}>
+              <strong>Strengths:</strong> {task.mentor_feedback.strengths}
+            </div>
+          )}
+          {task.mentor_feedback.improvements && (
+            <div style={{ marginTop: '0.2rem', fontSize: '0.78rem', color: '#b91c1c' }}>
+              <strong>Areas for Improvement:</strong> {task.mentor_feedback.improvements}
+            </div>
+          )}
+          {task.mentor_feedback.next_steps && (
+            <div style={{ marginTop: '0.2rem', fontSize: '0.78rem', color: '#6d28d9' }}>
+              <strong>Next Steps:</strong> {task.mentor_feedback.next_steps}
+            </div>
+          )}
+        </div>
+      )}
+
+      {task.status === 'changes_requested' && !task.mentor_feedback && (
+        <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.85rem', borderRadius: '10px', background: '#fff7ed', border: '1px solid #fed7aa', color: '#c2410c', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <AlertTriangle size={15} />
+          <span><strong>Changes Requested:</strong> Your mentor requested updates on this task. Review details and resubmit updated work.</span>
+        </div>
+      )}
+
+      <div className="card-meta-tags" style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+        {task.project_title && <span className="tag-pill" style={{ fontWeight: 600 }}>Project: {task.project_title}</span>}
+        {task.master_task_title && <span className="tag-pill">Master: {task.master_task_title}</span>}
+        {task.start_date && <span className="tag-pill">Start: {task.start_date}</span>}
+        <span className="tag-pill" style={{ color: isOverdue ? '#dc2626' : 'inherit' }}>Due: {task.due_date || 'Flexible'}</span>
+        <span className="tag-pill" style={{ color: priorityColor, fontWeight: 600 }}>Priority: {task.priority || 'Normal'}</span>
+        {task.estimated_hours != null && <span className="tag-pill">Est: {task.estimated_hours}h</span>}
+        {task.submission && (
+          <span className="tag-pill" style={{ color: '#16a34a', fontWeight: 600 }}>
+            <CheckCircle2 size={12} /> Submitted
+          </span>
+        )}
+      </div>
+
+      <div className="card-footer-actions" style={{ marginTop: '0.9rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <button className="btn btn-subtle btn-xs" onClick={onOpenDetails}>
+          View Details & Feedback
+        </button>
+
+        {(task.status === 'assigned' || task.status === 'changes_requested') && onStart && (
+          <button className="btn btn-primary btn-xs" onClick={onStart}>
+            <Play size={12} /> Start Task
+          </button>
+        )}
+
+        {(task.status === 'in_progress' || task.status === 'assigned' || task.status === 'changes_requested') && onSubmitWork && (
+          <button className="btn btn-outline btn-xs" onClick={onSubmitWork}>
+            Submit Work
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TaskDetailModal({ task, onClose, onStart, onSubmitOpen }) {
+  const priorityColor = task.priority === 'high' ? '#dc2626' : task.priority === 'low' ? '#64748b' : '#0284c7';
+
+  const modalHtml = (
+    <div className="modal-backdrop" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: 'rgba(8, 12, 24, 0.75)', backdropFilter: 'blur(8px)', display: 'grid', placeItems: 'center', zIndex: 99999 }} onClick={onClose}>
+      <div className="glass-card animate-fade-in" style={{ width: 'min(640px, calc(100vw - 2rem))', maxHeight: '90vh', overflowY: 'auto', padding: '1.5rem', background: '#ffffff', color: '#0f172a', border: '1px solid #e2e8f0', boxShadow: '0 20px 30px rgba(0,0,0,0.25)', borderRadius: '16px' }} onClick={(e) => e.stopPropagation()}>
+        <div className="section-header" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#0284c7', fontWeight: 700 }}>
+              {task.project_title ? `Project: ${task.project_title}` : 'Task Details'}
+            </span>
+            <h3 className="section-title" style={{ fontSize: '1.3rem', margin: '0.2rem 0', color: '#0f172a' }}>{task.title}</h3>
+            {task.master_task_title && (
+              <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>Master Task: {task.master_task_title}</p>
+            )}
+          </div>
+          <button type="button" onClick={onClose} style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer' }}><X size={20} /></button>
+        </div>
+
+        <div style={{ display: 'grid', gap: '1rem' }}>
+          {/* Metadata Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.6rem', padding: '0.85rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', fontSize: '0.8rem' }}>
+            <div>
+              <span style={{ color: '#64748b', display: 'block', fontSize: '0.7rem' }}>Status</span>
+              <strong style={{ color: '#0f172a', textTransform: 'capitalize' }}>{task.status.replace('_', ' ')}</strong>
+            </div>
+            <div>
+              <span style={{ color: '#64748b', display: 'block', fontSize: '.7rem' }}>Priority</span>
+              <strong style={{ color: priorityColor, textTransform: 'capitalize' }}>{task.priority || 'Normal'}</strong>
+            </div>
+            <div>
+              <span style={{ color: '#64748b', display: 'block', fontSize: '.7rem' }}>Timeline</span>
+              <strong style={{ color: '#0f172a' }}>{task.start_date || 'Start'} → {task.due_date || 'Flexible'}</strong>
+            </div>
+            <div>
+              <span style={{ color: '#64748b', display: 'block', fontSize: '.7rem' }}>Est. Hours</span>
+              <strong style={{ color: '#0f172a' }}>{task.estimated_hours ? `${task.estimated_hours}h` : 'N/A'}</strong>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <h4 style={{ margin: '0 0 0.3rem', fontSize: '0.9rem', color: '#0f172a', fontWeight: 700 }}>Description</h4>
+            <p style={{ margin: 0, color: '#334155', fontSize: '0.88rem', whiteSpace: 'pre-wrap', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '0.75rem', borderRadius: '8px' }}>
+              {task.description || 'No description provided for this task.'}
+            </p>
+          </div>
+
+          {/* Mentor Feedback (if present) */}
+          {task.mentor_feedback && (
+            <div style={{ border: '1px solid #c7d2fe', background: '#eef2ff', padding: '0.9rem', borderRadius: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+                <MessageSquare size={16} style={{ color: '#4f46e5' }} />
+                <h4 style={{ margin: 0, fontSize: '0.9rem', color: '#3730a3', fontWeight: 700 }}>Mentor Feedback</h4>
+              </div>
+              <p style={{ margin: '0 0 0.4rem', fontSize: '0.85rem', color: '#1e1b4b' }}>{task.mentor_feedback.feedback}</p>
+              {task.mentor_feedback.strengths && (
+                <div style={{ fontSize: '0.8rem', color: '#15803d' }}><strong>Strengths:</strong> {task.mentor_feedback.strengths}</div>
+              )}
+              {task.mentor_feedback.improvements && (
+                <div style={{ fontSize: '0.8rem', color: '#1b1b9e' }}><strong>Improvements:</strong> {task.mentor_feedback.improvements}</div>
+              )}
+              {task.mentor_feedback.next_steps && (
+                <div style={{ fontSize: '0.8rem', color: '#6d28d9' }}><strong>Next Steps:</strong> {task.mentor_feedback.next_steps}</div>
+              )}
+            </div>
+          )}
+
+          {/* Existing Submission */}
+          {task.submission && (
+            <div style={{ border: '1px solid #bbf7d0', background: '#f0fdf4', padding: '0.9rem', borderRadius: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+                <CheckCircle2 size={16} style={{ color: '#16a34a' }} />
+                <h4 style={{ margin: 0, fontSize: '0.9rem', color: '#166534', fontWeight: 700 }}>Submitted Deliverable</h4>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#14532d', whiteSpace: 'pre-wrap' }}>{task.submission.content}</p>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', marginTop: '0.5rem' }}>
+            {(task.status === 'assigned' || task.status === 'changes_requested') && (
+              <button className="btn btn-primary btn-sm" onClick={onStart}>Start Task</button>
+            )}
+            {(task.status === 'in_progress' || task.status === 'assigned' || task.status === 'changes_requested') && (
+              <button className="btn btn-outline btn-sm" onClick={() => { onClose(); onSubmitOpen(); }}>Submit Work</button>
+            )}
+            <button className="btn btn-subtle btn-sm" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return typeof document !== 'undefined' ? createPortal(modalHtml, document.body) : modalHtml;
+}
