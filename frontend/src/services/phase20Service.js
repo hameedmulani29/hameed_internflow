@@ -231,3 +231,73 @@ export async function fetchProviderCertificates() {
 export async function verifyCertificatePublic(certificateId) {
   return request(`/verify/${certificateId}`);
 }
+
+export async function downloadCertificateFile(certId, filename = null) {
+  const { getSession } = await import('./publicExperience');
+  const session = getSession('intern') || getSession('provider') || getSession();
+  const token = session?.token;
+  const API_BASE = import.meta.env.VITE_API_URL || '/api';
+  const fname = filename || `InternFlow_Certificate_${certId}.pdf`;
+
+  const response = await fetch(`${API_BASE}/certificates/${encodeURIComponent(certId)}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    throw new Error('Could not download certificate PDF artifact.');
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fname;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+export async function viewCertificateFile(certId) {
+  const { getSession } = await import('./publicExperience');
+  const session = getSession('intern') || getSession('provider') || getSession();
+  const token = session?.token;
+  const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
+  const response = await fetch(`${API_BASE}/certificates/${encodeURIComponent(certId)}/view`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    throw new Error('Could not view certificate PDF artifact.');
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  window.open(url, '_blank');
+}
+
+/* ============ Weekly Progress Reports ============ */
+
+export async function fetchMyWeeklyReports() {
+  const res = await request('/progress/weekly-reports/me');
+  return res.items || [];
+}
+
+export async function fetchAssignmentWeeklyReports(assignmentId) {
+  const res = await request(`/progress/weekly-reports/assignment/${assignmentId}`);
+  return res.items || [];
+}
+
+export async function fetchWeeklyReportDetail(reportId) {
+  return request(`/progress/weekly-reports/${reportId}`);
+}
+
+export async function generateWeeklyReport(payload) {
+  return request('/progress/weekly-report/generate', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+

@@ -1,103 +1,182 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 
-from app.core.permissions import require_roles
+from app.core.permissions import require_roles, current_user
 from app.db import get_db
+from app.services.weekly_report_service import (
+    generate_and_persist_weekly_report,
+    _format_weekly_report_record,
+    compute_reporting_week,
+)
 
 router = APIRouter(prefix='/api/progress', tags=['progress'])
 
 
-@router.get('/weekly-report/{assignment_id}')
-def generate_weekly_progress_report(assignment_id: int, user=Depends(require_roles('mentor', 'provider', 'intern'))):
-    with get_db() as db:
-        assignment = db.execute(
-            '''SELECT ma.*,
-                      u_intern.full_name AS intern_name, u_intern.email AS intern_email,
-                      u_mentor.full_name AS mentor_name,
-                      i.title AS internship_title
-               FROM mentor_assignments ma
-               JOIN users u_intern ON u_intern.id = ma.intern_id
-               JOIN users u_mentor ON u_mentor.id = ma.mentor_id
-               LEFT JOIN internships i ON i.id = ma.internship_id
-               WHERE ma.id = ?''',
-            (assignment_id,),
-        ).fetchone()
+class GenerateWeeklyReportRequest(BaseModel):
+    assignment_id: int
+    week_start: Optional[str] = None
+    week_end: Optional[str] = None
+    force_regenerate: bool = False
 
+
+# ================= Weekly Progress Reports API =================
+
+@router.post('/weekly-report/generate', status_code=status.HTTP_200_OK)
+def trigger_weekly_report_generation(
+    payload: GenerateWeeklyReportRequest,
+    user=Depends(require_roles('mentor', 'provider', 'intern')),
+):
+    """Triggers weekly progress collection, AI report generation, persistence, and Make #20 event."""
+    with get_db() as db:
+        assignment = db.execute('SELECT * FROM mentor_assignments WHERE id = ?', (payload.assignment_id,)).fetchone()
         if not assignment:
             raise HTTPException(status_code=404, detail='Mentor assignment not found.')
 
-        intern_id = assignment['intern_id']
+        try:
+            report = generate_and_persist_weekly_report(
+                db=db,
+                assignment_id=payload.assignment_id,
+                week_start=payload.week_start,
+                week_end=payload.week_end,
+                force_regenerate=payload.force_regenerate,
+            )
+            return report
+        except ValueError as val_err:
+            raise HTTPException(status_code=400, detail=str(val_err))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to generate weekly report: {exc}")
 
-        # Attendance stats
-        att_row = db.execute(
-            '''SELECT COUNT(*) AS days_present, COALESCE(SUM(work_minutes), 0) AS total_minutes
-               FROM attendance WHERE intern_id = ? AND status = 'checked_out' ''',
-            (intern_id,),
-        ).fetchone()
-        days_present = att_row['days_present'] or 0
-        total_hours = round((att_row['total_minutes'] or 0) / 60.0, 1)
 
-        # Task stats
-        tasks = db.execute(
-            'SELECT title, priority, status FROM mentor_tasks WHERE intern_id = ?',
+@router.get('/weekly-reports/me')
+def get_my_weekly_reports(user=Depends(require_roles('intern'))):
+    """Returns all generated weekly reports for the currently authenticated intern."""
+    intern_id = int(user['sub'])
+    with get_db() as db:
+        rows = db.execute(
+            '''SELECT * FROM weekly_reports
+               WHERE intern_id = ?
+               ORDER BY week_start DESC, id DESC''',
             (intern_id,),
         ).fetchall()
-        tot_tasks = len(tasks)
-        comp_tasks = sum(1 for t in tasks if t['status'] == 'completed')
-        submitted_tasks = sum(1 for t in tasks if t['status'] == 'submitted')
 
-        # Milestones
-        milestones = db.execute(
-            '''SELECT gm.title, gm.status FROM goal_milestones gm
-               JOIN internship_goals ig ON ig.id = gm.goal_id
-               WHERE ig.assignment_id = ?''',
+    return {'items': [_format_weekly_report_record(dict(r)) for r in rows]}
+
+
+@router.get('/weekly-reports/assignment/{assignment_id}')
+def get_assignment_weekly_reports(
+    assignment_id: int,
+    user=Depends(require_roles('mentor', 'provider', 'intern')),
+):
+    """Returns all weekly reports for a specific mentor assignment."""
+    user_id = int(user['sub'])
+    user_role = user.get('role')
+
+    with get_db() as db:
+        assignment = db.execute('SELECT * FROM mentor_assignments WHERE id = ?', (assignment_id,)).fetchone()
+        if not assignment:
+            raise HTTPException(status_code=404, detail='Mentor assignment not found.')
+
+        # IDOR Authorization check
+        if user_role == 'intern' and assignment['intern_id'] != user_id:
+            raise HTTPException(status_code=403, detail='Access denied to these weekly reports.')
+
+        rows = db.execute(
+            '''SELECT * FROM weekly_reports
+               WHERE assignment_id = ?
+               ORDER BY week_start DESC, id DESC''',
             (assignment_id,),
         ).fetchall()
-        tot_milestones = len(milestones)
-        comp_milestones = sum(1 for m in milestones if m['status'] == 'completed')
 
-        # Skill observations
-        observations = db.execute(
-            '''SELECT mso.*, s.name AS skill_name FROM mentor_skill_observations mso
-               JOIN skills s ON s.id = mso.skill_id
-               WHERE mso.intern_id = ? ORDER BY mso.created_at DESC''',
-            (intern_id,),
-        ).fetchall()
-        skills_obs_list = [f"{o['skill_name']} ({o['level']})" for o in observations]
+    return {'items': [_format_weekly_report_record(dict(r)) for r in rows]}
 
-    # Generate Markdown Summary
-    report_markdown = f"""
+
+@router.get('/weekly-reports/{report_id}')
+def get_weekly_report_by_id(report_id: int, user=Depends(current_user)):
+    """Retrieves a single weekly report by ID with IDOR authorization protection."""
+    user_id = int(user['sub'])
+    user_role = user.get('role')
+
+    with get_db() as db:
+        row = db.execute('SELECT * FROM weekly_reports WHERE id = ?', (report_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail='Weekly report not found.')
+
+        report_dict = dict(row)
+
+        if user_role == 'intern' and report_dict['intern_id'] != user_id:
+            raise HTTPException(status_code=403, detail='Access denied to this weekly report.')
+        if user_role == 'provider' and report_dict['provider_id'] != user_id:
+            raise HTTPException(status_code=403, detail='Access denied to this weekly report.')
+
+        return _format_weekly_report_record(report_dict)
+
+
+@router.get('/weekly-report/{assignment_id}')
+def generate_weekly_progress_report(
+    assignment_id: int,
+    user=Depends(require_roles('mentor', 'provider', 'intern')),
+):
+    """Backwards-compatible endpoint: Generates and returns a persisted weekly progress report."""
+    with get_db() as db:
+        assignment = db.execute('SELECT * FROM mentor_assignments WHERE id = ?', (assignment_id,)).fetchone()
+        if not assignment:
+            raise HTTPException(status_code=404, detail='Mentor assignment not found.')
+
+        w_start, w_end = compute_reporting_week()
+        report = generate_and_persist_weekly_report(
+            db=db,
+            assignment_id=assignment_id,
+            week_start=w_start,
+            week_end=w_end,
+            force_regenerate=False,
+        )
+
+        user_row = db.execute('SELECT full_name FROM users WHERE id = ?', (assignment['intern_id'],)).fetchone()
+        mentor_row = db.execute('SELECT full_name FROM users WHERE id = ?', (assignment['mentor_id'],)).fetchone()
+        internship_row = db.execute('SELECT title FROM internships WHERE id = ?', (assignment['internship_id'] or 1,)).fetchone()
+
+        intern_name = user_row['full_name'] if user_row else 'Intern'
+        mentor_name = mentor_row['full_name'] if mentor_row else 'Mentor'
+        internship_title = internship_row['title'] if internship_row else 'Engineering Internship'
+
+        metrics = report.get('metrics', {})
+
+        # Markdown representation for frontends that render raw markdown
+        report_markdown = f"""
 # Weekly Internship Progress Report
 
-**Intern:** {assignment['intern_name']}  
-**Role:** {assignment['internship_title'] or 'Engineering Intern'}  
-**Mentor:** {assignment['mentor_name']}  
+**Intern:** {intern_name}  
+**Role:** {internship_title}  
+**Mentor:** {mentor_name}  
+**Week Period:** {report['week_start']} to {report['week_end']}  
 
 ---
 
 ### Executive Summary
-{assignment['intern_name']} has completed **{comp_tasks} of {tot_tasks}** assigned tasks and **{comp_milestones} of {tot_milestones}** project milestones. Total logged attendance: **{total_hours} hours** across **{days_present} days**.
+{report['summary']}
 
-### Performance Highlights
-- **Task Execution:** {comp_tasks} completed, {submitted_tasks} pending review.
-- **Milestone Progress:** {comp_milestones}/{tot_milestones} completed.
-- **Observed Skills:** {', '.join(skills_obs_list) if skills_obs_list else 'Developing core engineering skills.'}
+### Completed Work
+{chr(10).join(f"- {w}" for w in report.get('completed_work', [])) if report.get('completed_work') else "- Maintained baseline workspace activity."}
+
+### Achievements & Highlights
+{chr(10).join(f"- {a}" for a in report.get('achievements', [])) if report.get('achievements') else "- Progressing on core deliverables."}
+
+### Next Week Focus
+{chr(10).join(f"- {f}" for f in report.get('next_week_focus', [])) if report.get('next_week_focus') else "- Advance sprint milestones."}
 
 ---
-*Generated by InternFlow AI Engine*
+*Generated by InternFlow AI Engine ({report['ai_status']})*
 """.strip()
 
-    return {
-        'assignment_id': assignment_id,
-        'intern_name': assignment['intern_name'],
-        'internship_title': assignment['internship_title'],
-        'summary': {
-            'total_hours': total_hours,
-            'days_present': days_present,
-            'tasks_completed': comp_tasks,
-            'total_tasks': tot_tasks,
-            'milestones_completed': comp_milestones,
-            'total_milestones': tot_milestones,
-            'observed_skills': skills_obs_list,
-        },
-        'report_markdown': report_markdown,
-    }
+        return {
+            'id': report['id'],
+            'assignment_id': assignment_id,
+            'intern_name': intern_name,
+            'internship_title': internship_title,
+            'week_start': report['week_start'],
+            'week_end': report['week_end'],
+            'summary': metrics,
+            'report_markdown': report_markdown,
+            'report_data': report,
+        }

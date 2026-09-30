@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Plus, Sparkles, X, ShieldCheck, Globe, Lock, Award, CheckCircle2, RefreshCw, AlertCircle } from 'lucide-react';
+import { Loader2, Plus, Sparkles, X, ShieldCheck, Globe, Lock, Award, CheckCircle2, RefreshCw, AlertCircle, Download, Eye } from 'lucide-react';
 import { fetchMySkills, updateMySkills } from '../../services/skillService';
-import { fetchMySkillPassport, togglePassportVisibility, fetchMyEvidence } from '../../services/phase20Service';
+import { fetchMySkillPassport, togglePassportVisibility, fetchMyEvidence, fetchMyCertificates, downloadCertificateFile, viewCertificateFile } from '../../services/phase20Service';
 import '../../styles/MySkillsPage.css';
 
 export default function MySkillsPage() {
   const [skills, setSkills] = useState([]);
   const [passport, setPassport] = useState(null);
   const [evidenceList, setEvidenceList] = useState([]);
+  const [certificates, setCertificates] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [isToggling, setIsToggling] = useState(false);
@@ -32,6 +33,9 @@ export default function MySkillsPage() {
 
       const evData = await fetchMyEvidence();
       setEvidenceList(evData);
+
+      const certs = await fetchMyCertificates();
+      setCertificates(certs);
     } catch (requestError) {
       setLoadError(requestError?.message || 'Unable to load your skills and passport.');
     } finally {
@@ -156,6 +160,67 @@ export default function MySkillsPage() {
           interviews, and mentor evaluations. Your Skill Passport is your verified record.
         </p>
       </div>
+
+      {/* ISSUED CERTIFICATES CARD */}
+      {certificates && certificates.length > 0 && (
+        <div className="glass-card my-skills-card" style={{ marginBottom: '1.5rem', background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.9))', border: '1px solid rgba(14, 165, 233, 0.4)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Award size={26} className="text-cyan" />
+              <div>
+                <h2 className="section-heading" style={{ margin: 0, color: '#fff' }}>Issued Internship Certificates</h2>
+                <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>Official Verified Proof of Completion</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+            {certificates.map((cert) => (
+              <div key={cert.id} style={{ background: 'rgba(30, 41, 59, 0.7)', padding: '18px', borderRadius: '12px', border: '1px solid rgba(14, 165, 233, 0.3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                  <span className="badge badge-success"><CheckCircle2 size={12} /> Verified Certificate</span>
+                  <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>ID: <strong className="cert-mono" style={{ color: '#38bdf8' }}>{cert.certificate_id}</strong></span>
+                </div>
+
+                <h3 style={{ fontSize: '1.1rem', color: '#f8fafc', margin: '6px 0 2px', fontWeight: 700 }}>{cert.internship_title}</h3>
+                <p style={{ fontSize: '0.88rem', color: '#38bdf8', margin: '0 0 10px', fontWeight: 600 }}>{cert.provider_name}</p>
+
+                <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginBottom: '14px', display: 'flex', gap: '16px' }}>
+                  <span><strong>Recipient:</strong> {cert.candidate_name}</span>
+                  <span><strong>Issued:</strong> {cert.issue_date?.split('T')[0] || cert.issue_date}</span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                    onClick={() => viewCertificateFile(cert.certificate_id)}
+                  >
+                    <Eye size={14} /> View Certificate
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary glass-btn-primary"
+                    style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                    onClick={() => downloadCertificateFile(cert.certificate_id)}
+                  >
+                    <Download size={14} /> Download PDF
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ fontSize: '0.8rem', padding: '6px 12px' }}
+                    onClick={() => window.open(`/verify?id=${encodeURIComponent(cert.certificate_id)}`, '_blank')}
+                  >
+                    <ShieldCheck size={14} /> Verify
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* SKILL PASSPORT CARD */}
       <div className="glass-card my-skills-card" style={{ marginBottom: '1.5rem', border: '1px solid rgba(56, 189, 248, 0.3)' }}>

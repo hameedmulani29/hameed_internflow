@@ -1,11 +1,15 @@
 import json
 import secrets
+from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app.core.permissions import require_roles
+from app.core.permissions import require_roles, current_user
 from app.db import get_db
+from app.services.certificate_generator import generate_certificate_pdf, get_storage_dir, sanitize_certificate_id
+from app.services.webhook_service import emit_certificate_issued_event
 
 router = APIRouter(prefix='/api', tags=['outcomes'])
 
@@ -87,6 +91,34 @@ def get_or_create_passport(db, intern_id: int) -> dict:
     return dict(row)
 
 
+def _ensure_certificate_pdf_exists(cert_dict: dict) -> str:
+    """Helper to ensure the physical PDF artifact exists on disk."""
+    cert_code = cert_dict['certificate_id']
+    safe_code = sanitize_certificate_id(cert_code)
+    target_dir = get_storage_dir()
+    expected_path = target_dir / f"certificate_{safe_code}.pdf"
+
+    if expected_path.is_file():
+        return str(expected_path.resolve())
+
+    # Regenerate PDF safely if missing
+    try:
+        skills = json.loads(cert_dict.get('verified_skills', '[]'))
+    except Exception:
+        skills = []
+
+    generated_path = generate_certificate_pdf(
+        certificate_id=cert_code,
+        candidate_name=cert_dict['candidate_name'],
+        internship_title=cert_dict['internship_title'],
+        provider_name=cert_dict['provider_name'],
+        issue_date=cert_dict['issue_date'],
+        verified_skills=skills,
+        verification_url=cert_dict['verification_url'],
+    )
+    return generated_path
+
+
 # ================= Outcomes & Verification API =================
 
 @router.post('/outcomes/complete/{assignment_id}', status_code=status.HTTP_200_OK)
@@ -100,7 +132,7 @@ def complete_internship_outcome(assignment_id: int, user=Depends(require_roles('
         intern_id = assignment['intern_id']
         internship_id = assignment['internship_id'] or 1
 
-        # Check final evaluation
+        # Check final evaluation completion (Strict eligibility check)
         fe = db.execute("SELECT * FROM final_evaluations WHERE assignment_id = ? AND status = 'submitted'", (assignment_id,)).fetchone()
         if not fe:
             raise HTTPException(status_code=400, detail='Final evaluation must be submitted before completing internship.')
@@ -139,24 +171,47 @@ def complete_internship_outcome(assignment_id: int, user=Depends(require_roles('
         verified_skills_list = evaluate_verified_skills(db, intern_id)
         skill_names = [s['skill_name'] for s in verified_skills_list]
 
-        # Generate Certificate
-        user_row = db.execute('SELECT full_name FROM users WHERE id = ?', (intern_id,)).fetchone()
+        # Check existing certificate for idempotency
+        existing_cert = db.execute('SELECT * FROM certificates WHERE outcome_id = ?', (outcome_id,)).fetchone()
+
+        user_row = db.execute('SELECT full_name, email FROM users WHERE id = ?', (intern_id,)).fetchone()
         provider_row = db.execute('SELECT organization, full_name FROM users WHERE id = ?', (provider_id,)).fetchone()
         internship_row = db.execute('SELECT title FROM internships WHERE id = ?', (internship_id,)).fetchone()
 
         candidate_name = user_row['full_name'] if user_row else 'Intern Candidate'
+        intern_email = user_row['email'] if user_row else 'intern@internflow.com'
         provider_name = (provider_row['organization'] or provider_row['full_name']) if provider_row else 'InternFlow Partner'
         internship_title = internship_row['title'] if internship_row else 'Software Engineering Internship'
 
-        cert_code = f"IF-2026-{secrets.token_hex(4).upper()}"
+        if existing_cert:
+            cert_code = existing_cert['certificate_id']
+            issue_date_val = existing_cert['issue_date']
+        else:
+            cert_code = f"IF-2026-{secrets.token_hex(4).upper()}"
+            issue_date_val = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
         verify_url = f"https://internflow.com/verify/{cert_code}"
+        download_url = f"/api/certificates/{cert_code}/download"
+
+        # Generate physical PDF artifact
+        pdf_file_path = generate_certificate_pdf(
+            certificate_id=cert_code,
+            candidate_name=candidate_name,
+            internship_title=internship_title,
+            provider_name=provider_name,
+            issue_date=issue_date_val,
+            verified_skills=skill_names,
+            verification_url=verify_url,
+        )
 
         db.execute(
-            '''INSERT INTO certificates (certificate_id, outcome_id, intern_id, provider_id, internship_id, candidate_name, internship_title, provider_name, verified_skills, verification_url)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            '''INSERT INTO certificates (certificate_id, outcome_id, intern_id, provider_id, internship_id, candidate_name, internship_title, provider_name, issue_date, verified_skills, verification_url, file_path, download_url)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(outcome_id) DO UPDATE SET
-               verified_skills=excluded.verified_skills''',
-            (cert_code, outcome_id, intern_id, provider_id, internship_id, candidate_name, internship_title, provider_name, json.dumps(skill_names), verify_url),
+               verified_skills=excluded.verified_skills,
+               file_path=excluded.file_path,
+               download_url=excluded.download_url''',
+            (cert_code, outcome_id, intern_id, provider_id, internship_id, candidate_name, internship_title, provider_name, issue_date_val, json.dumps(skill_names), verify_url, pdf_file_path, download_url),
         )
 
         # Mark assignment as completed
@@ -168,6 +223,21 @@ def complete_internship_outcome(assignment_id: int, user=Depends(require_roles('
         db.commit()
 
         cert_row = db.execute('SELECT * FROM certificates WHERE outcome_id = ?', (outcome_id,)).fetchone()
+
+    # Emit event for Make #25 (Non-blocking, post-commit)
+    emit_certificate_issued_event(
+        certificate_id=cert_code,
+        intern_id=intern_id,
+        intern_name=candidate_name,
+        intern_email=intern_email,
+        internship_id=internship_id,
+        internship_title=internship_title,
+        provider_id=provider_id,
+        provider_name=provider_name,
+        issue_date=cert_row['issue_date'],
+        verification_url=verify_url,
+        download_url=download_url,
+    )
 
     return {
         'outcome': dict(outcome_row),
@@ -328,6 +398,81 @@ def get_my_certificates(user=Depends(require_roles('intern'))):
     return {'items': [dict(r) for r in rows]}
 
 
+@router.get('/certificates/{certificate_id}')
+def get_certificate_details(certificate_id: str, user=Depends(current_user)):
+    """Retrieve detailed certificate metadata for authorized users (intern, provider, mentor)."""
+    user_id = int(user['sub'])
+    user_role = user.get('role')
+
+    with get_db() as db:
+        cert = db.execute('SELECT * FROM certificates WHERE certificate_id = ?', (certificate_id,)).fetchone()
+        if not cert:
+            raise HTTPException(status_code=404, detail='Certificate not found.')
+
+        cert_dict = dict(cert)
+
+        # Authorization check: intern owner, issuing provider, mentor, or admin
+        if user_role == 'intern' and cert_dict['intern_id'] != user_id:
+            raise HTTPException(status_code=403, detail='Access denied to this certificate.')
+        if user_role == 'provider' and cert_dict['provider_id'] != user_id:
+            raise HTTPException(status_code=403, detail='Access denied to this certificate.')
+
+        return cert_dict
+
+
+@router.get('/certificates/{certificate_id}/view')
+def view_certificate_pdf(certificate_id: str, user=Depends(current_user)):
+    """Inline view of the generated PDF certificate artifact in browser."""
+    user_id = int(user['sub'])
+    user_role = user.get('role')
+
+    with get_db() as db:
+        cert = db.execute('SELECT * FROM certificates WHERE certificate_id = ?', (certificate_id,)).fetchone()
+        if not cert:
+            raise HTTPException(status_code=404, detail='Certificate not found.')
+
+        cert_dict = dict(cert)
+
+        if user_role == 'intern' and cert_dict['intern_id'] != user_id:
+            raise HTTPException(status_code=403, detail='Access denied to this certificate.')
+        if user_role == 'provider' and cert_dict['provider_id'] != user_id:
+            raise HTTPException(status_code=403, detail='Access denied to this certificate.')
+
+    pdf_path = _ensure_certificate_pdf_exists(cert_dict)
+    return FileResponse(
+        pdf_path,
+        media_type='application/pdf',
+        headers={'Content-Disposition': f'inline; filename="certificate_{certificate_id}.pdf"'},
+    )
+
+
+@router.get('/certificates/{certificate_id}/download')
+def download_certificate_pdf(certificate_id: str, user=Depends(current_user)):
+    """Download the generated PDF certificate artifact as an attachment."""
+    user_id = int(user['sub'])
+    user_role = user.get('role')
+
+    with get_db() as db:
+        cert = db.execute('SELECT * FROM certificates WHERE certificate_id = ?', (certificate_id,)).fetchone()
+        if not cert:
+            raise HTTPException(status_code=404, detail='Certificate not found.')
+
+        cert_dict = dict(cert)
+
+        if user_role == 'intern' and cert_dict['intern_id'] != user_id:
+            raise HTTPException(status_code=403, detail='Access denied to this certificate.')
+        if user_role == 'provider' and cert_dict['provider_id'] != user_id:
+            raise HTTPException(status_code=403, detail='Access denied to this certificate.')
+
+    pdf_path = _ensure_certificate_pdf_exists(cert_dict)
+    filename = f"InternFlow_Certificate_{certificate_id}.pdf"
+    return FileResponse(
+        pdf_path,
+        media_type='application/pdf',
+        filename=filename,
+    )
+
+
 @router.get('/verify/{certificate_id}')
 def verify_certificate_public(certificate_id: str):
     """PUBLIC Certificate Verification Endpoint.
@@ -356,4 +501,5 @@ def verify_certificate_public(certificate_id: str):
         'issue_date': cert_dict['issue_date'],
         'verified_skills': skills,
         'verification_url': cert_dict['verification_url'],
+        'download_url': cert_dict.get('download_url') or f"/api/certificates/{cert_dict['certificate_id']}/download",
     }

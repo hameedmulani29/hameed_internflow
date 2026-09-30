@@ -519,6 +519,8 @@ CREATE TABLE IF NOT EXISTS certificates (
   issue_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   verified_skills TEXT NOT NULL,
   verification_url TEXT NOT NULL,
+  file_path TEXT,
+  download_url TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (outcome_id) REFERENCES internship_outcomes(id),
   FOREIGN KEY (intern_id) REFERENCES users(id),
@@ -546,6 +548,34 @@ CREATE TABLE IF NOT EXISTS activity_events (
   FOREIGN KEY (task_id) REFERENCES mentor_tasks(id)
 );
 CREATE INDEX IF NOT EXISTS idx_activity_events_mentor ON activity_events(mentor_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS weekly_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assignment_id INTEGER NOT NULL,
+  intern_id INTEGER NOT NULL,
+  provider_id INTEGER NOT NULL,
+  internship_id INTEGER NOT NULL,
+  week_start TEXT NOT NULL,
+  week_end TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  completed_work TEXT NOT NULL,
+  pending_work TEXT NOT NULL,
+  achievements TEXT NOT NULL,
+  challenges TEXT NOT NULL,
+  next_week_focus TEXT NOT NULL,
+  mentor_attention_items TEXT NOT NULL,
+  metrics TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'generated' CHECK (status IN ('generated', 'sent', 'failed')),
+  ai_status TEXT NOT NULL DEFAULT 'completed' CHECK (ai_status IN ('completed', 'fallback', 'failed')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (assignment_id, week_start, week_end),
+  FOREIGN KEY (assignment_id) REFERENCES mentor_assignments(id),
+  FOREIGN KEY (intern_id) REFERENCES users(id),
+  FOREIGN KEY (provider_id) REFERENCES users(id),
+  FOREIGN KEY (internship_id) REFERENCES internships(id)
+);
+CREATE INDEX IF NOT EXISTS idx_weekly_reports_intern ON weekly_reports(intern_id, week_start DESC);
 """
 
 
@@ -669,6 +699,9 @@ def init_db():
     # Master UI integration: optional per-assessment time limit (minutes).
     # NULL means untimed; existing rows stay untimed and fully functional.
     _ensure_column('assessments', 'duration_minutes', 'duration_minutes INTEGER')
+    # Certificate System: persistent file path & download URL
+    _ensure_column('certificates', 'file_path', 'file_path TEXT')
+    _ensure_column('certificates', 'download_url', 'download_url TEXT')
 
 
 
