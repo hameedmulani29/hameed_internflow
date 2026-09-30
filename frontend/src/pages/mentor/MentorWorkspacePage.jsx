@@ -46,10 +46,13 @@ import {
 } from '../../services/publicExperience';
 import { fetchMentorInternDetail, createSkillObservation, OBSERVATION_LEVELS } from '../../services/skillService';
 import { fetchReceivedFeedback } from '../../services/mentorFeedbackService';
+import { fetchAssignmentWeeklyReports } from '../../services/phase20Service';
 import { subscribeToMentorMonitoring } from '../../services/realtimeService';
+import { buildAttentionQueue, deriveInternState, deriveTaskInsights, progressStateLabel, summarizeProgressStates, PROGRESS_STATES } from '../../services/orchestrationService';
 
 import '../../styles/ProviderDashboard.css';
 import '../../styles/MentorWorkspace.css';
+import '../../styles/Orchestration.css';
 
 function formatActivityTime(isoString) {
   if (!isoString) return '';
@@ -158,11 +161,50 @@ function Metric({ label, value, icon: Icon, detail }) {
   );
 }
 
-function Dashboard({ data, internFeedback, onNavigate, activityFeed = [] }) {
+/* Control-tower helpers: progress-state chips with evidence, never a bare label (§17). */
+function ProgressStateChip({ state }) {
+  const cls = {
+    [PROGRESS_STATES.ON_TRACK]: 'on_track',
+    [PROGRESS_STATES.AHEAD]: 'ahead',
+    [PROGRESS_STATES.AT_RISK]: 'at_risk',
+    [PROGRESS_STATES.BLOCKED]: 'blocked',
+    [PROGRESS_STATES.INACTIVE]: 'inactive',
+    [PROGRESS_STATES.COMPLETED]: 'completed',
+  }[state] || 'on_track';
+  return <span className={`orchestration-state orchestration-state-${cls}`}>{progressStateLabel(state)}</span>;
+}
+
+function AttentionRow({ item, onNavigate }) {
+  const navigateFor = (kind) => {
+    if (kind === 'review') return '/mentor/submissions';
+    if (kind === 'evaluation') return '/mentor/evaluations';
+    if (kind === 'stale_intern') return '/mentor/interns';
+    return '/mentor/tasks';
+  };
+  return (
+    <div className="orchestration-attention-row">
+      <span className={`orchestration-sev orchestration-sev-${item.severity}`} aria-hidden="true">
+        {item.severity === 1 ? '!' : item.severity === 2 ? 'R' : '•'}
+      </span>
+      <div className="orchestration-attention-main">
+        <strong>{item.title}</strong>
+        {item.evidence.map((line) => (
+          <small key={line}>{line}</small>
+        ))}
+      </div>
+      <button type="button" className="orchestration-attention-action" onClick={() => onNavigate(navigateFor(item.kind))}>
+        {item.actionLabel} <ArrowRight size={12} />
+      </button>
+    </div>
+  );
+}
+
+function Dashboard({ data, internFeedback, onNavigate, activityFeed = [], mentorTasks = [] }) {
   const internsList = data?.interns || [];
   const pendingReviews = data?.pending_reviews || [];
   const projectsSummary = data?.projects_summary || [];
   const recentActivity = activityFeed.length ? activityFeed : (data?.recent_activity || []);
+  const pendingEvaluations = data?.pending_evaluations || [];
 
   const metrics = data?.metrics || {
     assigned_interns: internsList.length,
@@ -173,6 +215,22 @@ function Dashboard({ data, internFeedback, onNavigate, activityFeed = [] }) {
     upcoming_evaluations: 0,
   };
 
+  /* Orchestration layer: progress states + Requires-Attention queue derived from
+     real dashboard data (system states with evidence — prompt §17/§18). The
+     authoritative AI monitoring service is a documented backend gap. */
+  const attentionItems = buildAttentionQueue({
+    tasks: mentorTasks,
+    pendingReviews,
+    evaluations: pendingEvaluations,
+    interns: internsList,
+  });
+  const tasksByIntern = {};
+  internsList.forEach((intern) => {
+    tasksByIntern[intern.id] = mentorTasks.filter((t) => t.intern_id === intern.id);
+  });
+  const stateSummary = summarizeProgressStates(internsList, tasksByIntern);
+  const attentionCount = attentionItems.length;
+
   return (
     <>
       <div className="mentor-metric-grid">
@@ -181,6 +239,42 @@ function Dashboard({ data, internFeedback, onNavigate, activityFeed = [] }) {
         <Metric label="Active Projects" value={metrics.active_projects || projectsSummary.length} icon={FolderKanban} detail="In Execution" />
         <Metric label="Overall Delivery" value={`${metrics.overall_progress || 0}%`} icon={CheckCircle2} detail="Completed" />
       </div>
+
+      {/* Control tower: progress-state rollup + Requires Attention queue */}
+      <section className="mentor-panel" aria-label="Requires attention">
+        <div className="mentor-panel-heading">
+          <div>
+            <span>Requires Attention</span>
+            <small>System-detected exceptions across your interns — review, understand, decide</small>
+          </div>
+          <span className="orchestration-state orchestration-state-info" style={{ alignSelf: 'center' }}>
+            {attentionCount === 0 ? 'All clear' : `${attentionCount} item${attentionCount > 1 ? 's' : ''}`}
+          </span>
+        </div>
+
+        <div className="orchestration-state-strip" role="list" aria-label="Progress states">
+          {[
+            PROGRESS_STATES.ON_TRACK,
+            PROGRESS_STATES.AHEAD,
+            PROGRESS_STATES.AT_RISK,
+            PROGRESS_STATES.BLOCKED,
+            PROGRESS_STATES.INACTIVE,
+            PROGRESS_STATES.COMPLETED,
+          ].map((stateKey) => (
+            <span role="listitem" key={stateKey} className={`orchestration-state orchestration-state-${stateKey}`}>
+              {progressStateLabel(stateKey)}: <strong>{stateSummary.counts[stateKey] || 0}</strong>
+            </span>
+          ))}
+        </div>
+
+        {attentionItems.length === 0 ? (
+          <EmptyState title="Nothing Requires Attention" message="No overdue tasks, pending reviews, or inactive interns detected. The orchestrator flags exceptions here automatically." />
+        ) : (
+          attentionItems.slice(0, 8).map((item) => (
+            <AttentionRow key={item.id} item={item} onNavigate={onNavigate} />
+          ))
+        )}
+      </section>
 
       <div className="mentor-content-grid">
         <section className="mentor-panel">
@@ -231,6 +325,12 @@ function Dashboard({ data, internFeedback, onNavigate, activityFeed = [] }) {
               const completion = intern.progress_percent !== undefined
                 ? intern.progress_percent
                 : (intern.task_count ? Math.round((intern.completed_tasks / intern.task_count) * 100) : 0);
+              const derived = deriveInternState({
+                taskCount: intern.task_count || 0,
+                completedTasks: intern.completed_tasks || 0,
+                tasks: mentorTasks.filter((t) => t.intern_id === intern.id),
+                lastActivity: intern.last_activity,
+              });
               return (
                 <article className="mentor-intern-card" key={intern.id}>
                   <div className="mentor-avatar">
@@ -243,9 +343,7 @@ function Dashboard({ data, internFeedback, onNavigate, activityFeed = [] }) {
                   <div className="mentor-intern-main">
                     <div className="mentor-row-heading">
                       <strong>{intern.full_name}</strong>
-                      <span className={`mentor-status ${intern.status?.replace('_', ' ')}`}>
-                        {intern.status?.replace('_', ' ')}
-                      </span>
+                      <ProgressStateChip state={derived.state} />
                     </div>
                     <p>{intern.completed_tasks || 0} of {intern.task_count || 0} tasks completed</p>
                     <div className="mentor-progress-label">
@@ -424,8 +522,8 @@ function InternsPage({ items = [], onNavigate }) {
 
         <select className="provider-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="">All Statuses</option>
-          <option value="on_track">On Track</option>
-          <option value="needs_attention">Needs Attention</option>
+          <option value="active">Active</option>
+          <option value="paused">Paused</option>
           <option value="completed">Completed</option>
         </select>
       </div>
@@ -440,6 +538,11 @@ function InternsPage({ items = [], onNavigate }) {
                 const completion = intern.task_count
                   ? Math.round((intern.completed_tasks / intern.task_count) * 100)
                   : 0;
+                const derived = deriveInternState({
+                  taskCount: intern.task_count || 0,
+                  completedTasks: intern.completed_tasks || 0,
+                  lastActivity: intern.last_activity,
+                });
                 return (
                   <article className="mentor-intern-card" key={intern.id}>
                     <div className="mentor-avatar">
@@ -452,11 +555,9 @@ function InternsPage({ items = [], onNavigate }) {
                     <div className="mentor-intern-main">
                       <div className="mentor-row-heading">
                         <strong>{intern.full_name}</strong>
-                        <span className={`mentor-status ${intern.status?.replace('_', ' ')}`}>
-                          {intern.status?.replace('_', ' ')}
-                        </span>
+                        <ProgressStateChip state={derived.state} />
                       </div>
-                      <p>{intern.email} • {intern.program || 'Full Stack Web Development'}</p>
+                      <p>{intern.email}{intern.internship_title ? ` • ${intern.internship_title}` : ''}</p>
                       <div className="mentor-progress-label">
                         <span>Task Completion ({intern.completed_tasks} / {intern.task_count} completed)</span>
                         <strong>{completion}%</strong>
@@ -464,6 +565,14 @@ function InternsPage({ items = [], onNavigate }) {
                       <div className="mentor-progress">
                         <span style={{ width: `${completion}%` }} />
                       </div>
+                      <details className="orchestration-evidence">
+                        <summary>Why this state?</summary>
+                        <ul>
+                          {derived.evidence.map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
+                      </details>
                     </div>
                     <button
                       className="mentor-primary-button"
@@ -497,6 +606,8 @@ function InternDetailPage({ internId, onNavigate, onRecorded }) {
   const [detail, setDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [weeklyReports, setWeeklyReports] = useState(null);
+  const [blockers, setBlockers] = useState(null);
 
   // Observation form
   const [obsSkill, setObsSkill] = useState('');
@@ -513,10 +624,28 @@ function InternDetailPage({ internId, onNavigate, onRecorded }) {
       return;
     }
     setIsLoading(true);
+    setWeeklyReports(null);
+    setBlockers(null);
     fetchMentorInternDetail(internId)
-      .then((data) => {
+      .then(async (data) => {
         setDetail(data);
         setError('');
+        // Orchestration evidence: AI/prepared weekly reports + blocker reports
+        // the intern filed through the mentor-feedback channel.
+        const assignmentId = data.assignment?.id || null;
+        const [weeklyRes, feedbackRes] = await Promise.all([
+          assignmentId
+            ? fetchAssignmentWeeklyReports(assignmentId).catch(() => ({ items: [] }))
+            : Promise.resolve({ items: [] }),
+          fetchReceivedFeedback().catch(() => ({ items: [] })),
+        ]);
+        setWeeklyReports(weeklyRes.items || []);
+        const internName = data.intern?.full_name || '';
+        setBlockers(
+          (feedbackRes.items || []).filter(
+            (item) => item.intern_name === internName && String(item.message || '').startsWith('[Blocker]'),
+          ),
+        );
       })
       .catch((requestError) => setError(requestError?.message || 'Unable to load this intern.'))
       .finally(() => setIsLoading(false));
@@ -556,6 +685,12 @@ function InternDetailPage({ internId, onNavigate, onRecorded }) {
   const taskCount = detail.tasks.length;
   const completedCount = detail.tasks.filter((t) => t.status === 'completed').length;
   const pendingSubmissions = detail.submissions.filter((s) => s.status === 'pending').length;
+  const derived = deriveInternState({
+    taskCount,
+    completedTasks: completedCount,
+    tasks: detail.tasks,
+    lastActivity: null,
+  });
 
   const handleRecordObservation = async (e) => {
     e.preventDefault();
@@ -594,7 +729,18 @@ function InternDetailPage({ internId, onNavigate, onRecorded }) {
           <p>{detail.intern.email}{detail.assignment?.internship_title ? ` • ${detail.assignment.internship_title}` : ''}</p>
         </div>
         {detail.assignment && (
-          <span className="mentor-status active">{detail.assignment.status?.replace('_', ' ')}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <span className="mentor-status active">{detail.assignment.status?.replace('_', ' ')}</span>
+            <ProgressStateChip state={derived.state} />
+            <details className="orchestration-evidence">
+              <summary>Why this state?</summary>
+              <ul>
+                {derived.evidence.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </details>
+          </div>
         )}
       </div>
 
@@ -604,6 +750,78 @@ function InternDetailPage({ internId, onNavigate, onRecorded }) {
         <Metric label="Pending Reviews" value={pendingSubmissions} icon={FileCheck2} />
         <Metric label="Feedback Given" value={detail.feedback.length} icon={MessageSquare} />
       </div>
+
+      {/* Blocker reports the intern filed (structured [Blocker] reports via intern→mentor feedback) */}
+      <section className="mentor-panel" style={{ borderColor: blockers?.length ? 'rgba(234,88,12,0.5)' : undefined }}>
+        <div className="mentor-panel-heading">
+          <div>
+            <span>Blocker Reports</span>
+            <small>Reported by the intern through “Report a blocker” — help them unblock first</small>
+          </div>
+          {blockers?.length ? <span className="orchestration-state orchestration-state-blocked">{blockers.length} open</span> : null}
+        </div>
+        {blockers === null ? (
+          <p className="provider-body-copy" style={{ fontSize: '0.8rem' }}>Loading blocker reports…</p>
+        ) : blockers.length === 0 ? (
+          <EmptyState title="No Blocker Reports" message="Nothing is currently blocking this intern." />
+        ) : (
+          blockers.map((blocker) => {
+            const [, typeLine] = String(blocker.message).split('\n');
+            const body = String(blocker.message).split('\n').slice(2).join('\n').trim();
+            return (
+              <div className="orchestration-attention-row" key={blocker.id}>
+                <span className="orchestration-sev orchestration-sev-1" aria-hidden="true">!</span>
+                <div className="orchestration-attention-main">
+                  <strong>{typeLine ? typeLine.replace('Type: ', '') : 'Blocker'}</strong>
+                  <small>{blocker.created_at ? new Date(blocker.created_at).toLocaleString() : ''}</small>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.82rem', whiteSpace: 'pre-wrap' }}>{body}</p>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </section>
+
+      {/* AI / prepared weekly progress reports — real backend payloads, labeled by source */}
+      <section className="mentor-panel">
+        <div className="mentor-panel-heading">
+          <div>
+            <span>Weekly Progress Reports</span>
+            <small>Generated by the InternFlow AI engine from real tasks, attendance, and feedback data</small>
+          </div>
+        </div>
+        {weeklyReports === null ? (
+          <p className="provider-body-copy" style={{ fontSize: '0.8rem' }}>Loading weekly reports…</p>
+        ) : weeklyReports.length === 0 ? (
+          <EmptyState
+            title="No Weekly Reports Yet"
+            message="Weekly progress reports are generated automatically for active internships; the first one will appear here."
+          />
+        ) : (
+          weeklyReports.slice(0, 4).map((report) => (
+            <div className="orchestration-attention-row" key={report.id} style={{ alignItems: 'flex-start' }}>
+              <span className="orchestration-sev orchestration-sev-4" aria-hidden="true">✦</span>
+              <div className="orchestration-attention-main">
+                <strong>
+                  Week {report.week_start} → {report.week_end}
+                  <span className="orchestration-ai-note" style={{ marginLeft: 8 }}>
+                    {report.ai_status === 'fallback' ? 'AI summary unavailable — structured data summary' : 'AI-generated'} · Needs mentor review
+                  </span>
+                </strong>
+                <p style={{ margin: '4px 0', fontSize: '0.82rem' }}>{report.summary}</p>
+                {(report.mentor_attention_items || []).length > 0 && (
+                  <small style={{ display: 'block', color: '#9a3412', fontWeight: 600 }}>
+                    Attention: {report.mentor_attention_items.join('; ')}
+                  </small>
+                )}
+                {(report.challenges || []).length > 0 && (
+                  <small style={{ display: 'block' }}>Challenges: {report.challenges.join('; ')}</small>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </section>
 
       <div className="mentor-content-grid">
         <section className="mentor-panel">
@@ -635,7 +853,12 @@ function InternDetailPage({ internId, onNavigate, onRecorded }) {
                       </small>
                     )}
                   </div>
-                  <span className={`mentor-status ${task.status}`}>{task.status?.replace('_', ' ')}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {deriveTaskInsights(task).isOverdue && (
+                      <span className="orchestration-state orchestration-state-at_risk">Overdue</span>
+                    )}
+                    <span className={`mentor-status ${task.status}`}>{task.status?.replace('_', ' ')}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -819,9 +1042,11 @@ function TasksPage({ data = [], interns = [], onCreated }) {
           </div>
           <select className="provider-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="">All Task Statuses</option>
+            <option value="assigned">Assigned</option>
             <option value="in_progress">In Progress</option>
-            <option value="under_review">Under Review</option>
+            <option value="submitted">Submitted</option>
             <option value="completed">Completed</option>
+            <option value="changes_requested">Changes Requested</option>
           </select>
         </div>
 
@@ -941,6 +1166,10 @@ function SubmissionsPage({ data = [], onUpdated }) {
         </div>
       </div>
 
+      <p className="orchestration-ai-note" style={{ marginBottom: '14px' }}>
+        AI pre-review of submissions is not available yet — review every deliverable yourself. Your Approve / Request Changes decision is always the final human decision.
+      </p>
+
       <section className="mentor-panel">
         {error && <p className="mentor-error">{error}</p>}
         {filtered.length ? (
@@ -1032,6 +1261,7 @@ function FeedbackPage({ data = [], interns = [], onCreated }) {
           <h2 style={{ margin: '0 0 6px', fontSize: '1rem', color: 'var(--mentor-text)' }}>Submit Structuring Guidance & Feedback</h2>
           <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--provider-text-muted)' }}>
             Provide clear, actionable feedback to help interns improve deliverable quality.
+            An AI feedback draft assistant is planned but not connected yet — everything you write here is your own.
           </p>
         </div>
 
@@ -1464,6 +1694,21 @@ export default function MentorWorkspacePage(props) {
   // Intern → mentor feedback: fetched for the dedicated page and the dashboard preview.
   // While refetching, the previous list stays visible (no flicker); first mount shows the loading state.
   const [internFeedback, setInternFeedback] = useState({ items: [], loading: true, error: '' });
+  const [mentorTasks, setMentorTasks] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+    fetchMentorTasks()
+      .then((result) => {
+        if (active) setMentorTasks(result.items || []);
+      })
+      .catch(() => {
+        if (active) setMentorTasks([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refresh]);
 
   useEffect(() => {
     const isRelevantPath = path === '/mentor/intern-feedback' || path === '/mentor/dashboard';
@@ -1616,7 +1861,7 @@ export default function MentorWorkspacePage(props) {
           <>
             {isInternDetail && <InternDetailPage internId={detailInternId} onNavigate={onNavigate} />}
             {!isInternDetail && path === '/mentor/dashboard' && (
-              <Dashboard data={data || {}} internFeedback={internFeedback} onNavigate={onNavigate} activityFeed={liveActivities} />
+              <Dashboard data={data || {}} internFeedback={internFeedback} onNavigate={onNavigate} activityFeed={liveActivities} mentorTasks={mentorTasks} />
             )}
             {!isInternDetail && path === '/mentor/interns' && <InternsPage items={data?.items || interns} onNavigate={onNavigate} />}
             {!isInternDetail && path === '/mentor/projects' && <MentorProjectsPage />}

@@ -32,6 +32,17 @@ import {
 
 const PROJECT_STATUSES = ['draft', 'active', 'completed', 'archived'];
 
+const PLAN_STATUS_LABELS = {
+  not_planned: 'Not planned',
+  plan_ready: 'Plan ready for review',
+  executing: 'Executing',
+};
+
+function derivePlanStatus(project) {
+  if ((project.master_task_count || 0) === 0) return 'not_planned';
+  return project.status === 'active' ? 'executing' : 'plan_ready';
+}
+
 export default function MentorProjectsPage() {
   const [projects, setProjects] = useState(null); // null = loading
   const [error, setError] = useState('');
@@ -39,6 +50,9 @@ export default function MentorProjectsPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [selectedId, setSelectedId] = useState(null);
+  // Definition of Done (project-level). Persisting DoD requires backend
+  // support (documented gap) — collected here for the plan context.
+  const [defineDone, setDefineDone] = useState([{ text: '', done: false }]);
 
   const loadProjects = () => {
     setError('');
@@ -96,6 +110,17 @@ export default function MentorProjectsPage() {
   return (
     <>
       {formOpen && (
+        <div className="orchestration-plan-banner" role="note">
+          <Sparkles size={15} />
+          <span>
+            Plan proposal workflow: create the project, add master tasks (milestones) and chunks (work items),
+            then use the engines below to draft distribution and schedule — <strong>nothing goes live until you execute and approve it</strong>.
+            A fully AI-generated plan (drafted for your review) requires backend AI planning support.
+          </span>
+        </div>
+      )}
+
+      {formOpen && (
         <form className="mentor-panel mentor-form animate-fade-in" onSubmit={submit}>
           <label>
             Internship *
@@ -133,6 +158,43 @@ export default function MentorProjectsPage() {
               ))}
             </select>
           </label>
+          <div className="wide">
+            <strong style={{ fontSize: '0.82rem', color: 'var(--mentor-text)' }}>Definition of Done</strong>
+            <p style={{ margin: '2px 0 4px', fontSize: '0.74rem', color: 'var(--provider-text-muted)' }}>
+              What must be true for this project to count as complete. Stored with the plan once backend support lands; for now it guides the master tasks you add.
+            </p>
+            <div className="provider-dod-list">
+              {defineDone.map((item, idx) => (
+                <div className="provider-dod-row" key={idx}>
+                  <input
+                    className="provider-dod-input"
+                    value={item.text}
+                    onChange={(e) => setDefineDone((prev) => prev.map((d, i) => (i === idx ? { ...d, text: e.target.value } : d)))}
+                    placeholder={idx === 0 ? 'e.g. Authentication flow implemented and reviewed' : 'Another acceptance criterion…'}
+                    aria-label={`Definition of Done item ${idx + 1}`}
+                  />
+                  <button
+                    type="button"
+                    className="provider-quiet-button"
+                    style={{ fontSize: '0.7rem' }}
+                    onClick={() => setDefineDone((prev) => prev.filter((_, i) => i !== idx))}
+                    disabled={defineDone.length === 1}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="provider-quiet-button"
+                style={{ fontSize: '0.72rem', justifySelf: 'start' }}
+                onClick={() => setDefineDone((prev) => [...prev, { text: '', done: false }])}
+              >
+                <Plus size={12} /> Add acceptance criterion
+              </button>
+            </div>
+          </div>
+
           {formError && <p className="mentor-error" role="alert">{formError}</p>}
           <button className="mentor-primary-button" type="submit" disabled={saving}>
             <Plus size={14} /> {saving ? 'Creating…' : 'Create project'}
@@ -157,19 +219,27 @@ export default function MentorProjectsPage() {
         <section className="mentor-panel">
           <div className="mentor-panel-heading">
             <div>
-              <span>Projects</span>
-              <small>Project-level plan for each assigned internship — master tasks and chunks live under a project.</small>
+              <span>AI Planning &amp; Roadmap</span>
+              <small>Internship → Project → Milestones (master tasks) → Work items (chunks) → Intern tasks. Review every proposed plan before it activates.</small>
             </div>
             <button type="button" onClick={() => setFormOpen((open) => !open)}>
               {formOpen ? 'Cancel' : (<><Plus size={13} /> New project</>)}
             </button>
           </div>
 
+          <div className="orchestration-state-strip" role="list" aria-label="Plan status legend">
+            {Object.entries(PLAN_STATUS_LABELS).map(([key, label]) => (
+              <span role="listitem" key={key} className={`orchestration-state orchestration-state-${key === 'not_planned' ? 'inactive' : key === 'plan_ready' ? 'at_risk' : 'on_track'}`}>
+                {label}
+              </span>
+            ))}
+          </div>
+
           {projects.length === 0 ? (
             <div className="mentor-empty-state">
               <FolderKanban size={22} />
               <strong>No projects yet</strong>
-              <span>Create your first project for an assigned internship to start planning master tasks.</span>
+              <span>Create a project for an assigned internship, define its Definition of Done, then add master tasks to build the roadmap.</span>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '.6rem' }}>
@@ -177,6 +247,7 @@ export default function MentorProjectsPage() {
                 <ProjectCard
                   key={project.id}
                   project={project}
+                  planStatus={derivePlanStatus(project)}
                   isExpanded={selectedId === project.id}
                   onToggle={() => setSelectedId(selectedId === project.id ? null : project.id)}
                   onChanged={loadProjects}
@@ -225,7 +296,7 @@ function InternshipSelect() {
   );
 }
 
-function ProjectCard({ project, isExpanded, onToggle, onChanged }) {
+function ProjectCard({ project, planStatus, isExpanded, onToggle, onChanged }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
   const [statusBusy, setStatusBusy] = useState(false);
@@ -382,6 +453,9 @@ function ProjectCard({ project, isExpanded, onToggle, onChanged }) {
             {project.start_date ? ` · Timeline: ${project.start_date} to ${project.end_date || 'TBD'}` : ''}
           </small>
         </span>
+        <span className={`orchestration-state orchestration-state-${planStatus === 'not_planned' ? 'inactive' : planStatus === 'plan_ready' ? 'at_risk' : 'on_track'}`}>
+          {PLAN_STATUS_LABELS[planStatus]}
+        </span>
         <span className="provider-status-pill muted" style={{ fontSize: '.65rem', padding: '3px 8px' }}>{project.status}</span>
       </button>
 
@@ -399,6 +473,29 @@ function ProjectCard({ project, isExpanded, onToggle, onChanged }) {
                   {detail.objective && <span><strong>Objective:</strong> {detail.objective}</span>}
                   {detail.deliverable && <span><strong>Deliverable:</strong> {detail.deliverable}</span>}
                   {detail.description && <span><strong>Description:</strong> {detail.description}</span>}
+                </div>
+              )}
+
+              {/* Roadmap progress: milestone (master task) completion from real chunk status */}
+              {detail.master_tasks.length > 0 && (
+                <div style={{ display: 'grid', gap: '.45rem', padding: '.6rem', background: 'rgba(255,255,255,0.5)', borderRadius: '8px', border: '1px solid var(--provider-border)' }}>
+                  <strong style={{ fontSize: '.74rem', color: 'var(--mentor-text)' }}>Roadmap</strong>
+                  {detail.master_tasks.map((task) => {
+                    const taskChunks = detail.chunks.filter((c) => c.master_task_id === task.id);
+                    const doneChunks = taskChunks.filter((c) => c.status === 'completed').length;
+                    const pct = taskChunks.length ? Math.round((doneChunks / taskChunks.length) * 100) : 0;
+                    return (
+                      <div key={task.id}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.7rem', color: 'var(--provider-text-soft)' }}>
+                          <span>{task.sequence != null ? `${task.sequence + 1}. ` : ''}{task.title}</span>
+                          <strong>{taskChunks.length ? `${pct}%` : 'no work items yet'}</strong>
+                        </div>
+                        <div className="mentor-progress" style={{ marginTop: 2 }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${task.title} progress`}>
+                          <span style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -463,9 +560,16 @@ function ProjectCard({ project, isExpanded, onToggle, onChanged }) {
 
               {/* CORE MENTORSHIP ENGINE PANEL: Distribution & Scheduling */}
               <div style={{ marginTop: '.8rem', padding: '.8rem', background: 'rgba(248, 250, 252, 0.7)', borderRadius: '10px', border: '1px dashed var(--mentor-accent)' }}>
+                <div className="orchestration-plan-banner" role="note" style={{ marginBottom: '.6rem' }}>
+                  <Sparkles size={14} />
+                  <span>
+                    Generated plan proposal — review before activation. Distribution and schedule drafts are
+                    computed from your master tasks and chunks; <strong>nothing is applied until you execute</strong>.
+                  </span>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', marginBottom: '.6rem' }}>
                   <Sliders size={16} style={{ color: 'var(--mentor-accent)' }} />
-                  <strong style={{ fontSize: '.82rem', color: 'var(--mentor-text)' }}>Core Mentorship Execution Engine</strong>
+                  <strong style={{ fontSize: '.82rem', color: 'var(--mentor-text)' }}>Plan Distribution &amp; Scheduling</strong>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '.8rem' }}>

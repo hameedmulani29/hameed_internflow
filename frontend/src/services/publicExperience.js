@@ -19,6 +19,13 @@ export async function request(path, options = {}) {
     // matched '/internships' and wrongly attached the intern session to
     // provider internship requests.
     role = 'intern';
+  } else if (path === '/mentor-feedback' || path.startsWith('/mentor-feedback/')) {
+    // Shared resource used by BOTH roles (intern submits, mentor receives).
+    // Resolve the caller from the current location BEFORE the generic
+    // startsWith('/mentor') check, which would otherwise attach the mentor
+    // session to intern submissions and fail with 401.
+    const callerPath = typeof window !== 'undefined' ? window.location.pathname || '' : '';
+    role = callerPath.startsWith('/mentor') && !callerPath.startsWith('/mentor-feedback') ? 'mentor' : 'intern';
   } else if (path.startsWith('/mentor')) {
     role = 'mentor';
   } else if (path === '/applications' && options.method === 'POST') {

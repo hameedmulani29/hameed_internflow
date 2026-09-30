@@ -55,6 +55,7 @@ import { createMentorAssignment, fetchAvailableMentors, fetchProviderAssignments
 import SkillChip from '../../components/common/SkillChip';
 import '../../styles/ProviderDashboard.css';
 import '../../styles/ProviderWorkspace.css';
+import '../../styles/Orchestration.css';
 
 const PROVIDER_NAV = [
   { label: 'Dashboard', path: '/provider-dashboard', icon: LayoutDashboard },
@@ -501,11 +502,10 @@ function CreateInternship({ onNavigate }) {
     deadline: '',
     description: '',
     skills: 'React, Node.js, Python',
-    requirements: 'Strong problem-solving skills, basic web development knowledge',
-    responsibilities: 'Build features, write tests, participate in daily standups',
-    mentor_assigned: 'Priya Menon',
-    ai_screening_enabled: true,
   });
+  // Definition of Done: concrete acceptance criteria for the internship's project.
+  // Persisted through the existing description field (no backend change needed).
+  const [definitionOfDone, setDefinitionOfDone] = useState(['']);
 
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState('');
@@ -513,11 +513,13 @@ function CreateInternship({ onNavigate }) {
 
   const steps = [
     { title: 'Basic Information', kicker: 'Program identity & details' },
-    { title: 'Requirements & Scope', kicker: 'Skills & expectations' },
+    { title: 'Scope & Definition of Done', kicker: 'Skills, expectations & completion criteria' },
     { title: 'Selection Process', kicker: 'Screening & stages' },
-    { title: 'Configuration', kicker: 'Mentors & logistics' },
+    { title: 'Mentorship & Planning', kicker: 'What happens after publication' },
     { title: 'Review & Publish', kicker: 'Final verification' },
   ];
+
+  const cleanedDefinitionOfDone = definitionOfDone.map((item) => item.trim()).filter(Boolean);
 
   const handleInputChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -559,11 +561,19 @@ function CreateInternship({ onNavigate }) {
       ? formData.skills.split(',').map((s) => s.trim()).filter(Boolean)
       : (Array.isArray(formData.skills) ? formData.skills : []);
 
+    // Definition of Done is persisted inside the internship description so
+    // mentors and interns can see the completion criteria (existing field,
+    // no backend change).
+    const descriptionBody = formData.description.trim();
+    const fullDescription = cleanedDefinitionOfDone.length
+      ? `${descriptionBody}\n\nDefinition of Done:\n${cleanedDefinitionOfDone.map((item) => `- ${item}`).join('\n')}`
+      : descriptionBody;
+
     try {
       await createInternship({
         title: formData.title.trim(),
         department: formData.department.trim(),
-        description: formData.description.trim(),
+        description: fullDescription,
         location: formData.location.trim(),
         work_mode: formData.work_mode,
         duration: formData.duration.trim(),
@@ -735,25 +745,43 @@ function CreateInternship({ onNavigate }) {
                 />
               </label>
 
-              <label className="wide">
-                Key Requirements
-                <textarea
-                  rows="3"
-                  value={formData.requirements}
-                  onChange={(e) => handleInputChange('requirements', e.target.value)}
-                  placeholder="e.g. Solid computer science fundamentals, git workflow experience"
-                />
-              </label>
-
-              <label className="wide">
-                Core Responsibilities
-                <textarea
-                  rows="3"
-                  value={formData.responsibilities}
-                  onChange={(e) => handleInputChange('responsibilities', e.target.value)}
-                  placeholder="e.g. Implement REST endpoints, write unit tests, participate in design reviews"
-                />
-              </label>
+              <div className="wide">
+                <strong style={{ fontSize: '0.9rem', color: 'var(--provider-text)' }}>Definition of Done</strong>
+                <p style={{ margin: '4px 0 8px', fontSize: '0.82rem', color: 'var(--provider-text-soft)' }}>
+                  Concrete criteria that must be true for the project to count as complete (e.g. “API endpoints implemented and tested”).
+                  These are appended to the internship description so the assigned mentor and planning workflow can see them.
+                </p>
+                <div className="provider-dod-list">
+                  {definitionOfDone.map((item, idx) => (
+                    <div className="provider-dod-row" key={idx}>
+                      <input
+                        className="provider-dod-input"
+                        value={item}
+                        onChange={(e) => setDefinitionOfDone((prev) => prev.map((d, i) => (i === idx ? e.target.value : d)))}
+                        placeholder={idx === 0 ? 'e.g. Working prototype with documented API' : 'Another acceptance criterion…'}
+                        aria-label={`Definition of Done criterion ${idx + 1}`}
+                      />
+                      <button
+                        type="button"
+                        className="provider-quiet-button"
+                        style={{ fontSize: '0.72rem' }}
+                        onClick={() => setDefinitionOfDone((prev) => prev.filter((_, i) => i !== idx))}
+                        disabled={definitionOfDone.length === 1}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="provider-quiet-button"
+                    style={{ fontSize: '0.74rem', justifySelf: 'start' }}
+                    onClick={() => setDefinitionOfDone((prev) => [...prev, ''])}
+                  >
+                    <Plus size={13} /> Add acceptance criterion
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -761,18 +789,10 @@ function CreateInternship({ onNavigate }) {
             <div className="provider-form-grid animate-fade-in">
               <div className="wide" style={{ background: 'rgba(79, 70, 229, 0.06)', padding: '16px', borderRadius: '10px' }}>
                 <strong style={{ color: 'var(--provider-text)' }}>AI-Assisted Screening</strong>
-                <p style={{ margin: '4px 0 12px', fontSize: '0.82rem', color: 'var(--provider-text-soft)' }}>
-                  Automatically calculate match scores based on candidate resume analysis. Human reviewers retain final authority.
+                <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: 'var(--provider-text-soft)' }}>
+                  AI resume match scoring is available for every application from the Applications view — you trigger it per candidate.
+                  Scores are advisory only; <strong>human reviewers always make the final decision</strong>.
                 </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={formData.ai_screening_enabled}
-                    onChange={(e) => handleInputChange('ai_screening_enabled', e.target.checked)}
-                    style={{ width: 'auto' }}
-                  />
-                  <span>Enable AI Resume Match Scoring</span>
-                </label>
               </div>
 
               <div className="wide">
@@ -790,19 +810,19 @@ function CreateInternship({ onNavigate }) {
 
           {activeStep === 3 && (
             <div className="provider-form-grid animate-fade-in">
-              <label className="wide">
-                Assigned Lead Mentor
-                <select value={formData.mentor_assigned} onChange={(e) => handleInputChange('mentor_assigned', e.target.value)}>
-                  <option value="Priya Menon">Priya Menon (Lead Engineer)</option>
-                  <option value="Rahul Shah">Rahul Shah (Staff AI Scientist)</option>
-                  <option value="Dr. Aris Thorne">Dr. Aris Thorne (Research Director)</option>
-                </select>
-              </label>
-
-              <div className="wide" style={{ padding: '14px', background: 'rgba(240, 242, 252, 0.6)', borderRadius: '10px' }}>
-                <strong>Mentor Guidance Protocol</strong>
-                <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--provider-text-muted)' }}>
-                  Assigned mentors will receive weekly task submission queues and progress reports automatically once interns are onboarded.
+              <div className="wide" style={{ padding: '16px', background: 'rgba(240, 242, 252, 0.6)', borderRadius: '10px', display: 'grid', gap: '10px' }}>
+                <strong>Mentorship & AI Planning Workflow</strong>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--provider-text-soft)' }}>
+                  After publication, assign a mentor and intern from the <strong>Mentors</strong> view — that assignment links
+                  this internship, the mentor, and the intern.
+                </p>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--provider-text-soft)' }}>
+                  The mentor then builds the project plan (milestones, work items, Definition of Done) with the
+                  AI&nbsp;Internship&nbsp;Orchestrator on the mentor workspace and approves it before work starts.
+                </p>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--provider-text-muted)' }}>
+                  Weekly AI progress reports are generated automatically for every active assignment, and interns can
+                  report blockers that surface in the mentor&apos;s attention queue.
                 </p>
               </div>
             </div>
@@ -816,14 +836,25 @@ function CreateInternship({ onNavigate }) {
                   <span>Title<strong>{formData.title || 'Untitled Internship'}</strong></span>
                   <span>Department<strong>{formData.department}</strong></span>
                   <span>Location / Mode<strong>{formData.location} ({formData.work_mode})</strong></span>
+                  <span>Duration<strong>{formData.duration}</strong></span>
                   <span>Stipend<strong>{formData.stipend}</strong></span>
                   <span>Openings<strong>{formData.openings} positions</strong></span>
-                  <span>Mentor<strong>{formData.mentor_assigned}</strong></span>
+                  <span>Skills<strong>{formData.skills || '—'}</strong></span>
                 </div>
                 <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--provider-border)' }}>
                   <span style={{ fontSize: '0.74rem', color: 'var(--provider-text-muted)' }}>Description</span>
                   <p style={{ margin: '4px 0 0', fontSize: '0.84rem' }}>{formData.description || 'No description provided.'}</p>
                 </div>
+                {cleanedDefinitionOfDone.length > 0 && (
+                  <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--provider-border)' }}>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--provider-text-muted)' }}>Definition of Done (appended to description)</span>
+                    <ul style={{ margin: '6px 0 0', paddingLeft: '18px', fontSize: '0.84rem' }}>
+                      {cleanedDefinitionOfDone.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
           )}

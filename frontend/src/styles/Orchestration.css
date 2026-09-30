@@ -1,0 +1,139 @@
+/* ============================================================
+   AI Internship Orchestrator / Mentor Copilot — shared styles
+   Used by mentor control tower, intern dashboard, and planning UI.
+   Status colors never rely on color alone: each chip carries a text label.
+   ============================================================ */
+
+.orchestration-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.orchestration-state-on_track { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+.orchestration-state-ahead { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.orchestration-state-at_risk { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.orchestration-state-blocked { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
+.orchestration-state-inactive { background: #f8fafc; color: #475569; border-color: #e2e8f0; }
+.orchestration-state-completed { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+.orchestration-state-info { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+
+.orchestration-state-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.orchestration-state-strip .orchestration-state strong { margin-left: 2px; }
+
+.orchestration-attention-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--provider-border, #e2e8f0);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.65);
+  margin-bottom: 8px;
+}
+
+.orchestration-attention-main { flex: 1; min-width: 0; }
+.orchestration-attention-main strong { display: block; font-size: 0.82rem; color: var(--mentor-text, #0f172a); }
+.orchestration-attention-main small { display: block; font-size: 0.72rem; color: var(--provider-text-muted, #64748b); margin-top: 1px; }
+
+.orchestration-attention-action {
+  border: 1px solid var(--provider-border, #e2e8f0);
+  background: #fff;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 5px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  color: var(--mentor-accent, #4f46e5);
+}
+.orchestration-attention-action:hover { background: rgba(79, 70, 229, 0.06); }
+
+.orchestration-sev {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 900;
+  flex-shrink: 0;
+}
+.orchestration-sev-1 { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+.orchestration-sev-2 { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.orchestration-sev-3 { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.orchestration-sev-4 { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
+
+.orchestration-ai-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #4f46e5;
+  background: rgba(79, 70, 229, 0.08);
+  border: 1px solid rgba(79, 70, 229, 0.25);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.orchestration-evidence { font-size: 0.72rem; margin-top: 4px; }
+.orchestration-evidence summary {
+  cursor: pointer;
+  color: var(--mentor-accent, #4f46e5);
+  font-weight: 700;
+}
+.orchestration-evidence ul { margin: 4px 0 0; padding-left: 16px; color: var(--provider-text-soft, #475569); }
+
+.orchestration-plan-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid rgba(79, 70, 229, 0.3);
+  background: linear-gradient(135deg, rgba(224, 231, 255, 0.6), rgba(238, 242, 255, 0.45));
+  border-radius: 10px;
+  font-size: 0.76rem;
+  color: #3730a3;
+  margin-bottom: 12px;
+}
+
+/* Definition of Done checklist (internship builder) */
+.provider-dod-list { display: grid; gap: 8px; margin-top: 10px; }
+.provider-dod-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+.provider-dod-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--provider-border, #e2e8f0);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.provider-dod-hint { font-size: 0.74rem; color: var(--provider-text-muted, #64748b); margin-top: 6px; }
+
+@media (max-width: 640px) {
+  .orchestration-attention-row { flex-wrap: wrap; }
+  .orchestration-attention-action { margin-left: 32px; }
+  .provider-dod-row { grid-template-columns: 1fr; }
+}

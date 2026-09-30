@@ -14,6 +14,9 @@ import {
   MessageSquare,
   Play,
   X,
+  LifeBuoy,
+  Target,
+  Sparkles,
 } from 'lucide-react';
 import { getSession } from '../../services/publicExperience';
 import {
@@ -28,7 +31,8 @@ import {
   checkOutInternAttendance,
 } from '../../services/internService';
 import { subscribeToInternships } from '../../services/realtimeService';
-import { fetchUnreadFeedback, markFeedbackAsRead } from '../../services/mentorFeedbackService';
+import { fetchUnreadFeedback, markFeedbackAsRead, submitMentorFeedback } from '../../services/mentorFeedbackService';
+import { fetchMyWeeklyReports } from '../../services/phase20Service';
 import FeedbackNotificationModal from '../../components/intern/FeedbackNotificationModal';
 import '../../styles/InternWorkspace.css';
 
@@ -38,6 +42,19 @@ function formatMinutes(totalMinutes) {
   const minutes = totalMinutes % 60;
   return `${hours}h ${minutes}m`;
 }
+
+/* Blocker categories (orchestrator): sent to the mentor through the real
+   intern→mentor feedback channel until a dedicated backend entity exists. */
+const BLOCKER_TYPES = [
+  { id: 'technical_issue', label: 'Technical issue' },
+  { id: 'requirement_unclear', label: 'Requirement unclear' },
+  { id: 'dependency_blocked', label: 'Dependency blocked' },
+  { id: 'environment_setup', label: 'Environment / setup issue' },
+  { id: 'missing_access', label: 'Missing access' },
+  { id: 'knowledge_gap', label: 'Knowledge gap' },
+  { id: 'availability', label: 'Availability issue' },
+  { id: 'other', label: 'Other' },
+];
 
 /* Presentation labels for the authoritative backend lifecycle states. */
 const APP_STATUS_LABELS = {
@@ -75,6 +92,15 @@ export default function InternDashboardPage({ onNavigate }) {
   // Unread Feedback Popup State
   const [unreadFeedbackItems, setUnreadFeedbackItems] = useState([]);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+
+  // Latest AI/prepared weekly progress report (real backend payload)
+  const [weeklyReport, setWeeklyReport] = useState(null);
+
+  // Blocker reporting (goes to the mentor via the intern→mentor feedback channel)
+  const [blockerModalOpen, setBlockerModalOpen] = useState(false);
+  const [blockerDraft, setBlockerDraft] = useState({ type: 'technical_issue', details: '', affected: '' });
+  const [blockerSubmitting, setBlockerSubmitting] = useState(false);
+  const [blockerMessage, setBlockerMessage] = useState(null);
 
   const loadUnreadFeedback = async () => {
     try {
@@ -115,6 +141,15 @@ export default function InternDashboardPage({ onNavigate }) {
     }
   };
 
+  const loadWeeklyReport = async () => {
+    try {
+      const res = await fetchMyWeeklyReports();
+      setWeeklyReport(res?.items?.[0] || null);
+    } catch {
+      setWeeklyReport(null);
+    }
+  };
+
   const loadApplications = async () => {
     try {
       const items = await fetchMyApplications();
@@ -146,6 +181,7 @@ export default function InternDashboardPage({ onNavigate }) {
       loadApplications();
       loadLiveInternships();
       loadUnreadFeedback();
+      loadWeeklyReport();
     });
 
     const unsubscribe = subscribeToInternships({
@@ -229,6 +265,37 @@ export default function InternDashboardPage({ onNavigate }) {
     }
   };
 
+  const handleBlockerSubmit = async (event) => {
+    event.preventDefault();
+    if (blockerDraft.details.trim().length < 20) {
+      setBlockerMessage({ tone: 'error', text: 'Please describe the blocker in at least 20 characters so your mentor can help effectively.' });
+      return;
+    }
+    setBlockerSubmitting(true);
+    setBlockerMessage(null);
+    const taskObj = tasks.find((t) => String(t.id) === blockerDraft.affected);
+    const typeLabel = BLOCKER_TYPES.find((bt) => bt.id === blockerDraft.type)?.label || 'Blocker';
+    const lines = [
+      `[Blocker] Type: ${typeLabel}`,
+      taskObj ? `Affected task: ${taskObj.title} (task #${taskObj.id})` : 'Affected task: none specified',
+      '',
+      blockerDraft.details.trim(),
+    ];
+    try {
+      await submitMentorFeedback({ feedbackType: 'other', rating: null, message: lines.join('\n') });
+      setBlockerMessage({ tone: 'success', text: 'Blocker sent to your mentor — they will see it in their Intern Feedback queue.' });
+      setBlockerDraft({ type: 'technical_issue', details: '', affected: '' });
+      setTimeout(() => {
+        setBlockerModalOpen(false);
+        setBlockerMessage(null);
+      }, 2400);
+    } catch (error) {
+      setBlockerMessage({ tone: 'error', text: error.message || 'Could not send the blocker report. Please try again.' });
+    } finally {
+      setBlockerSubmitting(false);
+    }
+  };
+
   const handleTaskStatusUpdate = async (taskId, newStatus) => {
     try {
       await updateInternTaskStatus(taskId, newStatus);
@@ -251,6 +318,9 @@ export default function InternDashboardPage({ onNavigate }) {
     .sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
   const submittedTasks = tasks.filter((t) => t.status === 'submitted');
   const completedTasks = tasks.filter((t) => t.status === 'completed');
+  const changesRequestedTasks = tasks.filter((t) => t.status === 'changes_requested');
+  const progressPercent = tasks.length ? Math.round((completedTasks.length / tasks.length) * 100) : 0;
+  const nextActionTask = overdueTasks[0] || todayTasks[0] || upcomingTasks[0] || activeTasks[0] || null;
 
   // Filtered task view
   let displayedTasks = tasks;
@@ -304,6 +374,120 @@ export default function InternDashboardPage({ onNavigate }) {
           <span>{attendanceMessage}</span>
         </div>
       )}
+
+      {/* Orchestration strip: what to do today, current milestone, blockers, weekly progress */}
+      <section className="dashboard-section" style={{ marginTop: '1rem' }} aria-label="Today's focus">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '0.9rem' }}>
+          <div className="glass-card" style={{ padding: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
+              <Target size={16} className="text-cyan" />
+              <strong style={{ fontSize: '0.85rem', color: '#0f172a' }}>Today's Work</strong>
+            </div>
+            {isLoadingWorkspace ? (
+              <p className="card-desc-snippet">Loading…</p>
+            ) : todayTasks.length + overdueTasks.length > 0 ? (
+              <>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: '#334155' }}>
+                  <strong>{todayTasks.length + overdueTasks.length} task(s) to act on</strong>
+                  {overdueTasks.length > 0 ? ` — ${overdueTasks.length} overdue` : ''}.
+                </p>
+                <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                  Next: {(overdueTasks[0] || todayTasks[0])?.title}
+                </p>
+                <button
+                  className="btn btn-primary btn-xs"
+                  style={{ marginTop: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  onClick={() => setFilterCategory(overdueTasks.length ? 'overdue' : 'today')}
+                >
+                  Start working <ArrowRight size={12} />
+                </button>
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#334155' }}>
+                Nothing due today — check upcoming tasks or submit completed work.
+              </p>
+            )}
+          </div>
+
+          <div className="glass-card" style={{ padding: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
+              <FolderKanban size={16} className="text-cyan" />
+              <strong style={{ fontSize: '0.85rem', color: '#0f172a' }}>Current Milestone</strong>
+            </div>
+            {nextActionTask ? (
+              <>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: '#334155' }}>
+                  {nextActionTask.master_task_title || nextActionTask.project_title || 'First assigned task'}
+                </p>
+                <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: '#64748b' }}>
+                  {nextActionTask.project_title ? `Project: ${nextActionTask.project_title}` : 'Part of your active project plan'}
+                </p>
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#334155' }}>
+                No active task — your mentor&apos;s plan will appear here.
+              </p>
+            )}
+            <div style={{ marginTop: '0.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#64748b' }}>
+                <span>Overall progress</span>
+                <strong>{progressPercent}%</strong>
+              </div>
+              <div style={{ height: 6, borderRadius: 6, background: '#e2e8f0', overflow: 'hidden', marginTop: 3 }} role="progressbar" aria-valuenow={progressPercent} aria-valuemin={0} aria-valuemax={100}>
+                <div style={{ width: `${progressPercent}%`, height: '100%', background: 'linear-gradient(90deg,#0ea5e9,#6366f1)' }} />
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-card" style={{ padding: '1rem', borderColor: changesRequestedTasks.length ? 'rgba(234,88,12,0.45)' : undefined }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
+              <AlertTriangle size={16} style={{ color: changesRequestedTasks.length ? '#ea580c' : '#64748b' }} />
+              <strong style={{ fontSize: '0.85rem', color: '#0f172a' }}>Blockers</strong>
+            </div>
+            {changesRequestedTasks.length > 0 ? (
+              <>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: '#9a3412' }}>
+                  {changesRequestedTasks.length} task(s) need rework after mentor review.
+                </p>
+                <button className="btn btn-outline btn-xs" style={{ marginTop: '0.5rem' }} onClick={() => setFilterCategory('all')}>
+                  Review changes
+                </button>
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#334155' }}>No blockers on record.</p>
+            )}
+            <button
+              className="btn btn-subtle btn-xs"
+              style={{ marginTop: '0.5rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              onClick={() => setBlockerModalOpen(true)}
+            >
+              <LifeBuoy size={12} /> Report a blocker
+            </button>
+          </div>
+
+          <div className="glass-card" style={{ padding: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
+              <Sparkles size={16} className="text-cyan" />
+              <strong style={{ fontSize: '0.85rem', color: '#0f172a' }}>Weekly Progress</strong>
+            </div>
+            {weeklyReport ? (
+              <>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: '#334155', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {weeklyReport.summary}
+                </p>
+                <span className="tag-pill" style={{ marginTop: '0.4rem', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.68rem' }}>
+                  <Sparkles size={11} />
+                  {weeklyReport.ai_status === 'fallback' ? 'Prepared summary' : 'AI-generated summary'} · {weeklyReport.week_start} → {weeklyReport.week_end}
+                </span>
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>
+                Your first weekly progress report appears here once generated for your internship.
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
 
       {/* Main Execution Workspace & Tasks Section */}
       <section className="dashboard-section" style={{ marginTop: '1.5rem' }}>
@@ -376,6 +560,24 @@ export default function InternDashboardPage({ onNavigate }) {
           ) : (
             /* Categorized Multi-Section View */
             <div style={{ display: 'grid', gap: '1.5rem' }}>
+              {/* SECTION 0: START HERE — the orchestrated next action */}
+              {nextActionTask && (
+                <div style={{ border: '1px solid #bae6fd', background: 'linear-gradient(135deg, rgba(224,242,254,0.6), rgba(245,250,255,0.5))', borderRadius: '14px', padding: '0.9rem 1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.3rem' }}>
+                    <Target size={17} style={{ color: '#0284c7' }} />
+                    <h3 style={{ margin: 0, fontSize: '1rem', color: '#0f172a', fontWeight: 700 }}>
+                      Start here: {nextActionTask.title}
+                    </h3>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '0.82rem', color: '#475569' }}>
+                    {overdueTasks[0] ? 'Overdue — clear this first. ' : ''}
+                    {nextActionTask.master_task_title ? `Part of ${nextActionTask.master_task_title}. ` : ''}
+                    {nextActionTask.estimated_hours ? `Estimated ${nextActionTask.estimated_hours}h. ` : ''}
+                    {nextActionTask.due_date ? `Due ${nextActionTask.due_date}.` : 'No fixed deadline.'}
+                  </p>
+                </div>
+              )}
+
               {/* SECTION 1: OVERDUE TASKS (if any exist) */}
               {overdueTasks.length > 0 && (
                 <div style={{ border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: '14px', padding: '1rem', background: 'rgba(239, 68, 68, 0.05)' }}>
@@ -516,6 +718,12 @@ export default function InternDashboardPage({ onNavigate }) {
           onSubmitOpen={() => {
             setTaskDraft((curr) => ({ ...curr, taskId: String(selectedDetailTask.id) }));
             setShowTaskModal(true);
+          }}
+          onReportBlocker={() => {
+            setTaskDraft((curr) => ({ ...curr, taskId: String(selectedDetailTask.id) }));
+            setSelectedDetailTask(null);
+            setBlockerDraft((current) => ({ ...current, affected: String(selectedDetailTask.id) }));
+            setBlockerModalOpen(true);
           }}
         />
       )}
@@ -668,6 +876,89 @@ export default function InternDashboardPage({ onNavigate }) {
         )}
       </section>
 
+      {/* BLOCKER REPORT MODAL — routed to the mentor via the real intern→mentor feedback channel */}
+      {blockerModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="modal-backdrop" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: 'rgba(8, 12, 24, 0.75)', backdropFilter: 'blur(8px)', display: 'grid', placeItems: 'center', zIndex: 99999 }} onClick={() => setBlockerModalOpen(false)}>
+          <div className="glass-card" style={{ width: 'min(560px, calc(100vw - 2rem))', maxHeight: '90vh', overflowY: 'auto', padding: '1.5rem', background: '#ffffff', color: '#0f172a', border: '1px solid #e2e8f0', boxShadow: '0 20px 30px rgba(0,0,0,0.25)', borderRadius: '16px' }} onClick={(event) => event.stopPropagation()}>
+            <div className="section-header" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 className="section-title" style={{ fontSize: '1.2rem', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <LifeBuoy size={18} className="text-cyan" /> Report a Blocker
+                </h3>
+                <p className="section-subtitle" style={{ color: '#64748b' }}>Your mentor is notified immediately and can help unblock you.</p>
+              </div>
+              <button type="button" onClick={() => setBlockerModalOpen(false)} style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+
+            {blockerMessage && (
+              <div
+                className="alert-banner"
+                style={{
+                  marginBottom: '0.9rem',
+                  border: `1px solid ${blockerMessage.tone === 'success' ? '#16a34a' : '#dc2626'}`,
+                  color: blockerMessage.tone === 'success' ? '#166534' : '#b91c1c',
+                  background: blockerMessage.tone === 'success' ? '#f0fdf4' : '#fef2f2',
+                  borderRadius: '10px',
+                  padding: '0.6rem 0.9rem',
+                  fontSize: '0.85rem',
+                }}
+                role={blockerMessage.tone === 'success' ? 'status' : 'alert'}
+              >
+                <span>{blockerMessage.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleBlockerSubmit}>
+              <div style={{ display: 'grid', gap: '0.9rem' }}>
+                <label style={{ display: 'grid', gap: '0.3rem' }}>
+                  <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>What kind of blocker? *</span>
+                  <select value={blockerDraft.type} onChange={(event) => setBlockerDraft((current) => ({ ...current, type: event.target.value }))} style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem' }}>
+                    {BLOCKER_TYPES.map((bt) => (
+                      <option key={bt.id} value={bt.id}>{bt.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ display: 'grid', gap: '0.3rem' }}>
+                  <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Describe the blocker *</span>
+                  <textarea
+                    value={blockerDraft.details}
+                    onChange={(event) => setBlockerDraft((current) => ({ ...current, details: event.target.value }))}
+                    rows={4}
+                    placeholder="What is blocked, what you already tried, and what you need to proceed."
+                    style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem', resize: 'vertical' }}
+                  />
+                </label>
+
+                {tasks.length > 0 && (
+                  <label style={{ display: 'grid', gap: '0.3rem' }}>
+                    <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Affected task (optional)</span>
+                    <select value={blockerDraft.affected} onChange={(event) => setBlockerDraft((current) => ({ ...current, affected: event.target.value }))} style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem' }}>
+                      <option value="">Not task-specific</option>
+                      {tasks.map((task) => (
+                        <option key={task.id} value={String(task.id)}>{task.title}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                <p style={{ margin: 0, fontSize: '0.78rem', color: '#64748b' }}>
+                  Sent to your mentor as a structured report with the blocker type and affected task, visible in their Intern Feedback queue.
+                </p>
+              </div>
+
+              <div className="card-footer-actions" style={{ marginTop: '1.1rem', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button type="button" className="btn btn-subtle btn-sm" onClick={() => setBlockerModalOpen(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={blockerSubmitting}>
+                  {blockerSubmitting ? 'Sending…' : 'Send to Mentor'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* UNREAD MENTOR FEEDBACK NOTIFICATION MODAL */}
       {showFeedbackModal && unreadFeedbackItems.length > 0 && (
         <FeedbackNotificationModal
@@ -689,7 +980,7 @@ export default function InternDashboardPage({ onNavigate }) {
   );
 }
 
-function TaskCard({ task, isOverdue, isToday, onOpenDetails, onStart, onSubmitWork }) {
+function TaskCard({ task, isOverdue, isToday, onOpenDetails, onStart, onSubmitWork, onReportBlocker }) {
   const priorityColor = task.priority === 'high' ? '#dc2626' : task.priority === 'low' ? '#64748b' : '#0284c7';
 
   return (
@@ -775,6 +1066,12 @@ function TaskCard({ task, isOverdue, isToday, onOpenDetails, onStart, onSubmitWo
           View Details & Feedback
         </button>
 
+        {(task.status === 'assigned' || task.status === 'in_progress' || task.status === 'changes_requested') && onReportBlocker && (
+          <button className="btn btn-outline btn-xs" onClick={onReportBlocker} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <LifeBuoy size={12} /> Report blocker
+          </button>
+        )}
+
         {(task.status === 'assigned' || task.status === 'changes_requested') && onStart && (
           <button className="btn btn-primary btn-xs" onClick={onStart}>
             <Play size={12} /> Start Task
@@ -791,7 +1088,7 @@ function TaskCard({ task, isOverdue, isToday, onOpenDetails, onStart, onSubmitWo
   );
 }
 
-function TaskDetailModal({ task, onClose, onStart, onSubmitOpen }) {
+function TaskDetailModal({ task, onClose, onStart, onSubmitOpen, onReportBlocker }) {
   const priorityColor = task.priority === 'high' ? '#dc2626' : task.priority === 'low' ? '#64748b' : '#0284c7';
 
   const modalHtml = (
@@ -870,12 +1167,17 @@ function TaskDetailModal({ task, onClose, onStart, onSubmitOpen }) {
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', marginTop: '0.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
             {(task.status === 'assigned' || task.status === 'changes_requested') && (
               <button className="btn btn-primary btn-sm" onClick={onStart}>Start Task</button>
             )}
             {(task.status === 'in_progress' || task.status === 'assigned' || task.status === 'changes_requested') && (
               <button className="btn btn-outline btn-sm" onClick={() => { onClose(); onSubmitOpen(); }}>Submit Work</button>
+            )}
+            {(task.status !== 'completed') && onReportBlocker && (
+              <button className="btn btn-subtle btn-sm" onClick={onReportBlocker} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <LifeBuoy size={12} /> Report blocker
+              </button>
             )}
             <button className="btn btn-subtle btn-sm" onClick={onClose}>Close</button>
           </div>
