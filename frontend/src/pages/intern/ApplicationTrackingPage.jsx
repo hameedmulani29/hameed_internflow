@@ -89,6 +89,35 @@ export default function ApplicationTrackingPage({ applicationId, onNavigate }) {
     Promise.resolve().then(loadApplication);
   }, [applicationId]);
 
+  useEffect(() => {
+    if (!app?.id) return undefined;
+
+    let isCancelled = false;
+    let requestInFlight = false;
+
+    const refreshApplication = async () => {
+      if (document.visibilityState === 'hidden' || requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const updatedApplication = await fetchMyApplication(app.id);
+        if (!isCancelled) setApp(updatedApplication);
+      } catch {
+        // Keep the last known application state when a background refresh fails.
+      } finally {
+        requestInFlight = false;
+      }
+    };
+
+    const intervalId = window.setInterval(refreshApplication, 15000);
+    document.addEventListener('visibilitychange', refreshApplication);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshApplication);
+    };
+  }, [app?.id]);
+
   if (isLoading) {
     return (
       <div className="intern-page-container container">

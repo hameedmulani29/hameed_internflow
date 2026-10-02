@@ -99,8 +99,37 @@ def process_screening_job_sync(application_id: int) -> dict:
                 application_id,
             ),
         )
-        db.commit()
         record = db.execute('SELECT * FROM application_screening_results WHERE application_id = ?', (application_id,)).fetchone()
+
+    # Dispatch Make Resume Screening Webhook if configured
+    try:
+        with db_mod.get_db() as db:
+            candidate_row = db.execute(
+                "SELECT u.full_name FROM applications a JOIN users u ON u.id = a.applicant_id WHERE a.id = ?",
+                (application_id,),
+            ).fetchone()
+            req_skills = db.execute(
+                "SELECT s.name FROM internship_skills isx JOIN skills s ON s.id = isx.skill_id WHERE isx.internship_id = ?",
+                (app_row['internship_id'],),
+            ).fetchall()
+            cand_name = candidate_row['full_name'] if candidate_row else 'Applicant'
+            skill_list = [r['name'] for r in req_skills]
+
+        from app.services.webhook_service import emit_resume_screening_requested_event
+        emit_resume_screening_requested_event(
+            application_id=application_id,
+            candidate_name=cand_name,
+            internship_title=app_row['internship_title'],
+            internship_description=app_row['internship_description'] or '',
+            required_skills=skill_list,
+            preferred_skills=[],
+            required_qualifications=[],
+            preferred_qualifications=[],
+            resume_file_url=None,
+            extracted_resume_text=resume_text,
+        )
+    except Exception as exc:
+        logger.warning('Failed to dispatch Make resume screening webhook: %s', exc)
 
     return dict(record)
 

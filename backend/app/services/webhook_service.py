@@ -1,7 +1,10 @@
+import logging
 import os
 import secrets
 from datetime import datetime, timezone
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 def _get_timestamp() -> str:
@@ -14,9 +17,25 @@ def _dispatch_webhook(webhook_url: str | None, payload: dict, event_label: str) 
     try:
         with httpx.Client(timeout=5.0) as client:
             resp = client.post(webhook_url, json=payload)
-            return resp.status_code < 400
+            if resp.status_code >= 400:
+                logger.warning(
+                    'Make webhook dispatch failed: event=%s status_code=%s',
+                    event_label,
+                    resp.status_code,
+                )
+                return False
+            logger.info(
+                'Make webhook dispatch succeeded: event=%s status_code=%s',
+                event_label,
+                resp.status_code,
+            )
+            return True
     except Exception as err:
-        print(f"[Webhook Warning] Failed to dispatch {event_label} event to Make.com ({webhook_url}): {err}")
+        logger.warning(
+            'Make webhook dispatch failed: event=%s error_type=%s',
+            event_label,
+            type(err).__name__,
+        )
         return False
 
 
@@ -1051,4 +1070,38 @@ def emit_scheduled_cleanup_event(
     }
     url = os.getenv("MAKE_SCHEDULED_CLEANUP_WEBHOOK_URL")
     _dispatch_webhook(url, payload, "scheduled.cleanup")
+    return payload
+
+
+# ------------------------------------------------------------------------------
+# AUTOMATION #31 — MAKE RESUME SCREENING WEBHOOK
+# ------------------------------------------------------------------------------
+def emit_resume_screening_requested_event(
+    application_id: str | int,
+    candidate_name: str,
+    internship_title: str,
+    internship_description: str,
+    required_skills: list[str] | None = None,
+    preferred_skills: list[str] | None = None,
+    required_qualifications: list[str] | None = None,
+    preferred_qualifications: list[str] | None = None,
+    resume_file_url: str | None = None,
+    extracted_resume_text: str = "",
+) -> dict:
+    payload = {
+        "application_id": str(application_id),
+        "candidate_name": candidate_name,
+        "internship": {
+            "title": internship_title,
+            "description": internship_description,
+            "required_skills": required_skills or [],
+            "preferred_skills": preferred_skills or [],
+            "required_qualifications": required_qualifications or [],
+            "preferred_qualifications": preferred_qualifications or [],
+        },
+        "resume_file_url": resume_file_url,
+        "extracted_resume_text": extracted_resume_text,
+    }
+    url = os.getenv("MAKE_RESUME_SCREENING_WEBHOOK_URL") or os.getenv("MAKE_RESUME_WEBHOOK_URL")
+    _dispatch_webhook(url, payload, "resume.screening_requested")
     return payload
