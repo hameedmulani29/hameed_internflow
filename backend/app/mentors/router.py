@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.core.permissions import require_roles
 from app.core.security import decode_token_str
-from app.db import get_db, seed_mentor_demo_data
+from app.db import get_db, is_unique_violation, seed_mentor_demo_data
 from app.skills.router import get_or_create_skill, ObservationInput
 from app.services.distribution_service import preview_distribution, execute_distribution
 from app.services.scheduling_service import preview_schedule, execute_schedule
@@ -97,15 +97,16 @@ def create_assignment(payload: AssignmentInput, token=Depends(require_roles('pro
                 raise HTTPException(status_code=404, detail='Internship not found for this provider.')
         try:
             cursor = db.execute(
-                'INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id) VALUES (?, ?, ?)',
+                'INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id) VALUES (%s, %s, %s) RETURNING id',
                 (payload.mentor_id, payload.intern_id, payload.internship_id),
             )
+            assign_id = cursor.fetchone()['id']
             db.commit()
         except Exception as error:
-            if 'UNIQUE constraint' in str(error):
+            if is_unique_violation(error) or 'UNIQUE constraint' in str(error):
                 raise HTTPException(status_code=409, detail='This intern is already assigned to that mentor.') from error
             raise
-        row = db.execute('SELECT * FROM mentor_assignments WHERE id = ?', (cursor.lastrowid,)).fetchone()
+        row = db.execute('SELECT * FROM mentor_assignments WHERE id = %s', (assign_id,)).fetchone()
     return serialize(row)
 
 
@@ -390,10 +391,10 @@ async def create_task(payload: TaskInput, token=Depends(require_roles('mentor'))
                     detail='internship_id does not match your active assignment for this intern.',
                 )
         cursor = db.execute(
-            'INSERT INTO mentor_tasks (mentor_id, intern_id, internship_id, title, description, priority, due_date) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO mentor_tasks (mentor_id, intern_id, internship_id, title, description, priority, due_date) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id',
             (mentor, payload.intern_id, payload.internship_id if payload.internship_id is not None else assignment['internship_id'], payload.title.strip(), payload.description.strip(), payload.priority, payload.due_date),
         )
-        task_id = cursor.lastrowid
+        task_id = cursor.fetchone()['id']
         await record_and_broadcast_activity(
             db,
             actor_id=mentor,
@@ -586,14 +587,15 @@ def create_observation(intern_id: int, payload: ObservationInput, token=Depends(
         skill_id, _ = get_or_create_skill(db, payload.skill)
         cursor = db.execute(
             '''INSERT INTO mentor_skill_observations (mentor_id, intern_id, task_id, skill_id, level, note)
-               VALUES (?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id''',
             (mentor, intern_id, payload.task_id, skill_id, payload.level, payload.note),
         )
+        obs_id = cursor.fetchone()['id']
         # A mentor observation is stronger evidence than self-declaration:
         # upgrade the source if the skill already exists for this intern.
         db.execute(
             "INSERT INTO candidate_skills (intern_id, skill_id, source)"
-            " VALUES (?, ?, 'mentor_observation')"
+            " VALUES (%s, %s, 'mentor_observation')"
             " ON CONFLICT(intern_id, skill_id) DO UPDATE SET source = 'mentor_observation'",
             (intern_id, skill_id),
         )
@@ -601,8 +603,8 @@ def create_observation(intern_id: int, payload: ObservationInput, token=Depends(
         row = db.execute(
             '''SELECT o.id, o.level, o.note, o.created_at, s.name AS skill_name
                FROM mentor_skill_observations o JOIN skills s ON s.id = o.skill_id
-               WHERE o.id = ?''',
-            (cursor.lastrowid,),
+               WHERE o.id = %s''',
+            (obs_id,),
         ).fetchone()
     return serialize(row)
 
@@ -631,9 +633,10 @@ async def create_feedback(payload: FeedbackInput, token=Depends(require_roles('m
             if not task:
                 raise HTTPException(status_code=404, detail='Task not found.')
         cursor = db.execute(
-            'INSERT INTO mentor_feedback (mentor_id, intern_id, task_id, feedback, strengths, improvements, next_steps, is_read, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)',
+            'INSERT INTO mentor_feedback (mentor_id, intern_id, task_id, feedback, strengths, improvements, next_steps, is_read, read_at) VALUES (%s, %s, %s, %s, %s, %s, %s, 0, NULL) RETURNING id',
             (mentor, payload.intern_id, payload.task_id, payload.feedback.strip(), payload.strengths, payload.improvements, payload.next_steps),
         )
+        fb_id = cursor.fetchone()['id']
         await record_and_broadcast_activity(
             db,
             actor_id=mentor,
@@ -647,7 +650,7 @@ async def create_feedback(payload: FeedbackInput, token=Depends(require_roles('m
             task_id=payload.task_id,
         )
         db.commit()
-        row = db.execute('SELECT mf.*, u.full_name AS intern_name FROM mentor_feedback mf JOIN users u ON u.id = mf.intern_id WHERE mf.id = ?', (cursor.lastrowid,)).fetchone()
+        row = db.execute('SELECT mf.*, u.full_name AS intern_name FROM mentor_feedback mf JOIN users u ON u.id = mf.intern_id WHERE mf.id = %s', (fb_id,)).fetchone()
     return serialize(row)
 
 
@@ -668,11 +671,12 @@ def create_evaluation(payload: EvaluationInput, token=Depends(require_roles('men
     with get_db() as db:
         ensure_assignment(db, mentor, payload.intern_id)
         cursor = db.execute(
-            'INSERT INTO mentor_evaluations (mentor_id, intern_id, score, summary, status, due_date, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO mentor_evaluations (mentor_id, intern_id, score, summary, status, due_date, submitted_at) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id',
             (mentor, payload.intern_id, payload.score, payload.summary.strip(), payload.status, payload.due_date, datetime.now(timezone.utc).isoformat() if payload.status == 'submitted' else None),
         )
+        eval_id = cursor.fetchone()['id']
         db.commit()
-        row = db.execute('SELECT me.*, u.full_name AS intern_name FROM mentor_evaluations me JOIN users u ON u.id = me.intern_id WHERE me.id = ?', (cursor.lastrowid,)).fetchone()
+        row = db.execute('SELECT me.*, u.full_name AS intern_name FROM mentor_evaluations me JOIN users u ON u.id = me.intern_id WHERE me.id = %s', (eval_id,)).fetchone()
     return serialize(row)
 
 
@@ -809,16 +813,17 @@ def create_project(payload: ProjectInput, token=Depends(require_roles("mentor"))
         try:
             cursor = db.execute(
                 """INSERT INTO projects (internship_id, mentor_id, title, description, objective, deliverable, status, start_date, end_date)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                 (payload.internship_id, mentor, payload.title.strip(), payload.description, payload.objective,
                  payload.deliverable, payload.status, payload.start_date, payload.end_date),
             )
+            proj_id = cursor.fetchone()['id']
             db.commit()
         except Exception as error:
-            if "UNIQUE constraint" in str(error):
+            if is_unique_violation(error) or "UNIQUE constraint" in str(error):
                 raise HTTPException(status_code=409, detail="A project with this title already exists for this internship.") from error
             raise
-        row = db.execute("SELECT * FROM projects WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        row = db.execute("SELECT * FROM projects WHERE id = %s", (proj_id,)).fetchone()
     return serialize(row)
 
 
@@ -925,11 +930,12 @@ def create_master_task(project_id: int, payload: MasterTaskInput, token=Depends(
             ).fetchone()["next_seq"]
         cursor = db.execute(
             """INSERT INTO master_tasks (project_id, title, description, priority, estimated_hours, sequence)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
             (project_id, payload.title.strip(), payload.description, payload.priority, payload.estimated_hours, sequence),
         )
+        mtask_id = cursor.fetchone()['id']
         db.commit()
-        row = db.execute("SELECT * FROM master_tasks WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        row = db.execute("SELECT * FROM master_tasks WHERE id = %s", (mtask_id,)).fetchone()
     return serialize(row)
 
 
@@ -996,11 +1002,12 @@ def create_chunk(task_id: int, payload: ChunkInput, token=Depends(require_roles(
             ).fetchone()["next_seq"]
         cursor = db.execute(
             """INSERT INTO project_chunks (master_task_id, title, description, priority, estimated_hours, sequence)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
             (task_id, payload.title.strip(), payload.description, payload.priority, payload.estimated_hours, sequence),
         )
+        chunk_id = cursor.fetchone()['id']
         db.commit()
-        row = db.execute("SELECT * FROM project_chunks WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        row = db.execute("SELECT * FROM project_chunks WHERE id = %s", (chunk_id,)).fetchone()
     return serialize(row)
 
 

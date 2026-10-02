@@ -9,6 +9,7 @@ if PROJECT_ROOT not in sys.path:
 
 os.environ['INTERNFLOW_DB_PATH'] = os.path.join(_tmpdir, 'shortlist_communication_test.db')
 os.environ['INTERNFLOW_DEMO_DATA'] = 'false'
+os.environ['INTERNFLOW_SMTP_HOST'] = ''
 for module_name in [
     'app.db',
     'app.core.security',

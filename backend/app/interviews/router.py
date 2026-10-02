@@ -95,7 +95,7 @@ def schedule_interview(payload: InterviewScheduleInput, user=Depends(require_rol
 
         cursor = db.execute(
             '''INSERT INTO interviews (application_id, internship_id, candidate_id, interviewer_id, scheduled_at, duration_minutes, meeting_link, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id''',
             (
                 payload.application_id,
                 internship_id,
@@ -107,7 +107,7 @@ def schedule_interview(payload: InterviewScheduleInput, user=Depends(require_rol
                 payload.notes,
             ),
         )
-        interview_id = cursor.lastrowid
+        interview_id = cursor.fetchone()['id']
 
         db.execute("UPDATE applications SET status = 'interview' WHERE id = ?", (payload.application_id,))
         db.commit()
@@ -257,10 +257,10 @@ def submit_interview_scorecard(interview_id: int, payload: ScorecardInput, user=
 
         # Convert evaluated skills into Evidence records!
         for ev in payload.skill_evaluations:
-            sk_row = db.execute('SELECT id, name FROM skills WHERE name = ?', (ev.skill_name.casefold(),)).fetchone()
+            sk_row = db.execute('SELECT id, name FROM skills WHERE name = %s', (ev.skill_name.casefold(),)).fetchone()
             if not sk_row:
-                cursor = db.execute('INSERT INTO skills (name) VALUES (?)', (ev.skill_name.casefold(),))
-                sk_id = cursor.lastrowid
+                cursor = db.execute('INSERT INTO skills (name) VALUES (%s) RETURNING id', (ev.skill_name.casefold(),))
+                sk_id = cursor.fetchone()['id']
             else:
                 sk_id = sk_row['id']
 

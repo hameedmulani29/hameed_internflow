@@ -30,26 +30,17 @@ const providerWorkspacePaths = new Set([
   '/provider-settings',
 ]);
 
-const getPathRole = (path = window.location.pathname || '/') => {
-  if (path.startsWith('/provider')) return 'provider';
-  if (path.startsWith('/intern') || path === '/mentor-feedback') return 'intern';
-  if (path.startsWith('/mentor')) return 'mentor';
-  return null;
-};
-
 export default function App() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname || '/');
-  const [session, setSession] = useState(() => getSession(getPathRole(window.location.pathname)));
 
   useEffect(() => {
     const handlePopState = () => {
       const p = window.location.pathname || '/';
       setCurrentPath(p);
-      setSession(getSession(getPathRole(p)));
     };
     const handleSessionChange = () => {
       const p = window.location.pathname || '/';
-      setSession(getSession(getPathRole(p)));
+      setCurrentPath(p);
     };
     window.addEventListener('popstate', handlePopState);
     window.addEventListener('internflow_session_changed', handleSessionChange);
@@ -80,7 +71,6 @@ export default function App() {
     const basePath = targetPath.split('?')[0] || '/';
     window.history.pushState({}, '', path);
     setCurrentPath(basePath);
-    setSession(getSession(getPathRole(basePath)));
 
     if (hashPart) {
       window.setTimeout(() => {
@@ -125,16 +115,16 @@ export default function App() {
   }
 
   function renderPageContent() {
-    switch (currentPath) {
-      case '/explore':
+    switch (true) {
+      case currentPath === '/explore':
         return <ExploreInternshipsPage onNavigate={handleNavigate} />;
-      case '/verify':
+      case currentPath === '/verify' || currentPath.startsWith('/verify/'):
         return <VerifyCertificatePage onNavigate={handleNavigate} />;
-      case '/login':
+      case currentPath === '/login':
         return <LoginPage onNavigate={handleNavigate} />;
-      case '/register':
+      case currentPath === '/register':
         return <RegisterPage onNavigate={handleNavigate} />;
-      case '/':
+      case currentPath === '/':
       default:
         return <LandingPage onNavigate={handleNavigate} />;
     }

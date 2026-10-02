@@ -12,13 +12,13 @@ def setup_db():
 
 def test_ai_interview_question_generator_and_weekly_progress_report():
     with get_db() as db:
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Prov Adv', 'adv-prov@test.com', 'hash', 'provider')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Prov Adv', 'adv-prov@test.com', 'hash', 'provider') ON CONFLICT (email) DO NOTHING")
         p_id = db.execute("SELECT id FROM users WHERE email='adv-prov@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Mentor Adv', 'adv-mentor@test.com', 'hash', 'mentor')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mentor Adv', 'adv-mentor@test.com', 'hash', 'mentor') ON CONFLICT (email) DO NOTHING")
         m_id = db.execute("SELECT id FROM users WHERE email='adv-mentor@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Intern Adv', 'adv-intern@test.com', 'hash', 'intern')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Intern Adv', 'adv-intern@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING")
         i_id = db.execute("SELECT id FROM users WHERE email='adv-intern@test.com'").fetchone()[0]
 
         cursor = db.execute("INSERT INTO internships (provider_id, title, department, description, location, work_mode, duration, stipend, status) VALUES (?, 'Cloud Engineer', 'DevOps', 'Deploy Kubernetes and Docker.', 'Remote', 'Remote', '3m', '12k', 'published')", (p_id,))

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import InternBackground from '../../components/intern/InternBackground';
 import InternFloatingOrb from '../../components/intern/InternFloatingOrb';
 import InternDashboardPage from './InternDashboardPage';
+import InternInternshipWorkspacePage from './InternInternshipWorkspacePage';
 import ExploreInternshipsPage from './ExploreInternshipsPage';
 import InternshipDetailsPage from './InternshipDetailsPage';
 import ApplicationFlowPage from './ApplicationFlowPage';
@@ -32,6 +33,11 @@ export default function InternWorkspacePage({ path = '/intern/dashboard', onNavi
   // Parse sub-route and dynamic params
   const { routeKey, dynamicId } = useMemo(() => {
     // Dynamic matching
+    const parts = path.split('/');
+    if (path.startsWith('/intern/internship/')) {
+      // Selected candidate → their active internship workspace (assignment-scoped).
+      return { routeKey: 'internship-workspace', dynamicId: parts[3] || null };
+    }
     if (path.startsWith('/intern/internships/')) {
       const parts = path.split('/');
       return { routeKey: 'internship-details', dynamicId: parts[3] || null };
@@ -72,6 +78,8 @@ export default function InternWorkspacePage({ path = '/intern/dashboard', onNavi
     switch (routeKey) {
       case 'explore':
         return <ExploreInternshipsPage onNavigate={onNavigate} />;
+      case 'internship-workspace':
+        return <InternInternshipWorkspacePage onNavigate={onNavigate} />;
       case 'internship-details':
         return <InternshipDetailsPage internshipId={dynamicId} onNavigate={onNavigate} />;
       case 'apply':

@@ -2596,3 +2596,36 @@
   color: #0284c7;
   border: 1px solid #bae6fd;
 }
+
+/* ============ Internship workspace (/intern/internship/:id) ============ */
+/* Mobile-first ordering per the workspace UX spec: on small screens,
+   Today's Work follows the header + live ribbon; overview cards, plan
+   banner, roadmap, and the task archive move below it. Section ordering
+   keys off the workspace page's aria-labels only, so the intern dashboard
+   (same page class, no workspace aria-labels) keeps its source order. */
+@media (max-width: 720px) {
+  .intern-dashboard-page {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .intern-dashboard-page > .dashboard-section[aria-label="Today's work"] {
+    order: 1;
+  }
+
+  .intern-dashboard-page > .dashboard-section[aria-label='Internship overview'] {
+    order: 2;
+  }
+
+  .intern-dashboard-page > section:not([aria-label]):not(.dashboard-hero-banner) {
+    order: 3;
+  }
+
+  .intern-dashboard-page > .dashboard-section[aria-label='Roadmap and expectations'] {
+    order: 4;
+  }
+
+  .intern-dashboard-page > .dashboard-section[aria-label='All work and progress reports'] {
+    order: 5;
+  }
+}

@@ -6,7 +6,7 @@ from app.applications.screening_service import run_resume_screening
 from app.applications.status_service import send_interview_required_webhook, transition_application_status
 from app.applications.worker import process_screening_job, process_screening_job_sync
 from app.core.permissions import require_roles
-from app.db import get_db
+from app.db import get_db, is_unique_violation
 from app.notifications.shortlist_service import trigger_shortlist_communication
 from app.resumes.parser import extract_text_from_pdf_bytes, validate_pdf_file
 
@@ -147,22 +147,22 @@ async def upload_resume_pdf(file: UploadFile = File(...), user=Depends(require_r
 @router.post('', status_code=status.HTTP_201_CREATED)
 async def apply(payload: ApplicationInput, background_tasks: BackgroundTasks, user=Depends(require_roles('intern'))):
     with get_db() as db:
-        internship = db.execute("SELECT id FROM internships WHERE id = ? AND status = 'published'", (payload.internship_id,)).fetchone()
+        internship = db.execute("SELECT id FROM internships WHERE id = %s AND status = 'published'", (payload.internship_id,)).fetchone()
         if not internship:
             raise HTTPException(status_code=404, detail='Published internship not found.')
         try:
             cursor = db.execute(
-                'INSERT INTO applications (internship_id, applicant_id, resume_text, resume_file_name, resume_mime_type) VALUES (?, ?, ?, ?, ?)',
+                'INSERT INTO applications (internship_id, applicant_id, resume_text, resume_file_name, resume_mime_type) VALUES (%s, %s, %s, %s, %s) RETURNING id',
                 (payload.internship_id, int(user['sub']), payload.resume_text.strip() if payload.resume_text else None, payload.resume_file_name, payload.resume_mime_type),
             )
-            app_id = cursor.lastrowid
+            app_id = cursor.fetchone()['id']
             db.execute(
-                "INSERT INTO application_screening_results (application_id, internship_id, applicant_id, status, model_used, created_at, updated_at) VALUES (?, ?, ?, 'pending', 'gemini-2.0-flash', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                "INSERT INTO application_screening_results (application_id, internship_id, applicant_id, status, model_used, created_at, updated_at) VALUES (%s, %s, %s, 'pending', 'gemini-2.0-flash', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
                 (app_id, payload.internship_id, int(user['sub'])),
             )
             db.commit()
         except Exception as error:
-            if 'UNIQUE constraint' in str(error):
+            if is_unique_violation(error) or 'UNIQUE constraint' in str(error):
                 raise HTTPException(status_code=409, detail='You have already applied to this internship.') from error
             raise
 

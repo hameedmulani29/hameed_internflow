@@ -187,6 +187,11 @@ export async function fetchMentorInterns() {
   return request('/mentor/interns');
 }
 
+/** Recent attendance for an assigned intern — mentor monitoring view (backend-authorized). */
+export async function fetchMentorInternAttendance(internId) {
+  return request(`/attendance/intern/${internId}`);
+}
+
 export async function fetchMentorTasks() {
   return request('/mentor/tasks');
 }

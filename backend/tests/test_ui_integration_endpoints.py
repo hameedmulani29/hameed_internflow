@@ -93,7 +93,7 @@ def test_provider_assessment_list_includes_attempt_stats():
         a_cur = db.execute("INSERT INTO assessments (title, provider_id, internship_id, pass_score, duration_minutes) VALUES ('UI Test', ?, ?, 70, 45)", (ids['provider'], ids['internship']))
         a_id = a_cur.lastrowid
         db.execute("INSERT INTO assessment_questions (assessment_id, question_id) VALUES (?, ?)", (a_id, q1))
-        db.execute("INSERT INTO assessment_attempts (assessment_id, candidate_id, application_id, status, overall_score, passed) VALUES (?, ?, ?, 'completed', 84, 1)", (a_id, ids['intern'], ids['application']))
+        db.execute("INSERT INTO assessment_attempts (assessment_id, candidate_id, application_id, status, overall_score, passed) VALUES (?, ?, ?, 'completed', 84, TRUE)", (a_id, ids['intern'], ids['application']))
         db.execute("INSERT INTO assessment_attempts (assessment_id, candidate_id, application_id, status) VALUES (?, ?, ?, 'in_progress')", (a_id, ids['intern'], ids['application']))
         db.commit()
 
@@ -216,7 +216,7 @@ def test_provider_mentee_detail_scoping_and_content():
 
     # An intern NOT assigned under this provider's internships must 404.
     with get_db() as db:
-        other_intern_cur = db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Stranger Intern', 'stranger@test.com', 'hash', 'intern')")
+        other_intern_cur = db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Stranger Intern', 'stranger@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING")
         other_intern_id = db.execute("SELECT id FROM users WHERE email='stranger@test.com'").fetchone()[0]
         asg_cur = db.execute("INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (?, ?, ?, 'active')", (ids['mentor'], other_intern_id, ids['other_internship']))
         asg_id = asg_cur.lastrowid
@@ -231,7 +231,7 @@ def test_provider_application_attempts_endpoint():
     with get_db() as db:
         a_cur = db.execute("INSERT INTO assessments (title, provider_id, internship_id, pass_score) VALUES ('Attempt List Test', ?, ?, 70)", (ids['provider'], ids['internship']))
         a_id = a_cur.lastrowid
-        db.execute("INSERT INTO assessment_attempts (assessment_id, candidate_id, application_id, status, overall_score, passed) VALUES (?, ?, ?, 'completed', 55, 0)", (a_id, ids['intern'], ids['application']))
+        db.execute("INSERT INTO assessment_attempts (assessment_id, candidate_id, application_id, status, overall_score, passed) VALUES (?, ?, ?, 'completed', 55, FALSE)", (a_id, ids['intern'], ids['application']))
         db.commit()
 
     headers = {'Authorization': f"Bearer {create_token(ids['provider'], 'provider')}"}

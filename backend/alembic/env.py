@@ -2,6 +2,10 @@ import os
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
+from dotenv import load_dotenv
+
+load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 config = context.config
 
@@ -11,7 +15,12 @@ if config.config_file_name:
 target_metadata = None
 
 def get_url():
-    return os.getenv("DATABASE_URL", "sqlite:///internflow.db")
+    url = os.getenv("DATABASE_URL", "sqlite:///internflow.db")
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+    elif url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+psycopg://", 1)
+    return url
 
 def run_migrations_offline():
     url = get_url()

@@ -20,22 +20,22 @@ def test_certificate_full_lifecycle():
     # 1. Setup seed database entities
     with get_db() as db:
         db.execute(
-            "INSERT OR IGNORE INTO users (full_name, email, password_hash, role, organization) VALUES ('Tech Innovations Provider', 'provider-cert@test.com', 'hash', 'provider', 'Tech Innovations')"
+            "INSERT INTO users (full_name, email, password_hash, role, organization) VALUES ('Tech Innovations Provider', 'provider-cert@test.com', 'hash', 'provider', 'Tech Innovations') ON CONFLICT (email) DO NOTHING"
         )
         provider_id = db.execute("SELECT id FROM users WHERE email='provider-cert@test.com'").fetchone()[0]
 
         db.execute(
-            "INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Mentor Robert', 'mentor-cert@test.com', 'hash', 'mentor')"
+            "INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mentor Robert', 'mentor-cert@test.com', 'hash', 'mentor') ON CONFLICT (email) DO NOTHING"
         )
         mentor_id = db.execute("SELECT id FROM users WHERE email='mentor-cert@test.com'").fetchone()[0]
 
         db.execute(
-            "INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Intern Alex', 'alex-cert@test.com', 'hash', 'intern')"
+            "INSERT INTO users (full_name, email, password_hash, role) VALUES ('Intern Alex', 'alex-cert@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING"
         )
         intern_a_id = db.execute("SELECT id FROM users WHERE email='alex-cert@test.com'").fetchone()[0]
 
         db.execute(
-            "INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Intern Unauthorized', 'other-cert@test.com', 'hash', 'intern')"
+            "INSERT INTO users (full_name, email, password_hash, role) VALUES ('Intern Unauthorized', 'other-cert@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING"
         )
         intern_b_id = db.execute("SELECT id FROM users WHERE email='other-cert@test.com'").fetchone()[0]
 
@@ -46,7 +46,7 @@ def test_certificate_full_lifecycle():
         internship_id = cursor.lastrowid
 
         db.execute(
-            "INSERT OR IGNORE INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (?, ?, ?, 'active')",
+            "INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (?, ?, ?, 'active') ON CONFLICT (mentor_id, intern_id) DO NOTHING",
             (mentor_id, intern_a_id, internship_id),
         )
         assignment_id = db.execute(

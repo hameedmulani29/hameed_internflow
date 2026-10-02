@@ -7,12 +7,30 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies and Build Outputs
 node_modules
 dist
 dist-ssr
 *.local
 .freebuff
+
+# Environment Configuration
 .env
+.env.*
+!.env.example
+
+# Python & Test Caches
+__pycache__/
+*.pyc
+.pytest_cache/
+coverage/
+.coverage
+
+# Database & Generated Files
+*.db
+*.sqlite
+*.sqlite3
+backend/storage/certificates/*.pdf
 
 # Editor directories and files
 .vscode/*

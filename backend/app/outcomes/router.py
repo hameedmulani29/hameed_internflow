@@ -83,7 +83,7 @@ def get_or_create_passport(db, intern_id: int) -> dict:
 
     code = f"SP-2026-{secrets.token_hex(4).upper()}"
     db.execute(
-        'INSERT INTO skill_passports (candidate_id, passport_code, is_public) VALUES (?, ?, 0)',
+        'INSERT INTO skill_passports (candidate_id, passport_code, is_public) VALUES (?, ?, FALSE) ON CONFLICT (candidate_id) DO NOTHING',
         (intern_id, code),
     )
     db.commit()
@@ -322,7 +322,7 @@ def toggle_passport_visibility(payload: VisibilityInput, user=Depends(require_ro
     candidate_id = int(user['sub'])
     with get_db() as db:
         get_or_create_passport(db, candidate_id)
-        db.execute('UPDATE skill_passports SET is_public = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?', (1 if payload.is_public else 0, candidate_id))
+        db.execute('UPDATE skill_passports SET is_public = ?, updated_at = CURRENT_TIMESTAMP WHERE candidate_id = ?', (payload.is_public, candidate_id))
         db.commit()
         passport = db.execute('SELECT * FROM skill_passports WHERE candidate_id = ?', (candidate_id,)).fetchone()
     return dict(passport)

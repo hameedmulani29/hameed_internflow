@@ -67,7 +67,8 @@ def _record_communication(application_id: int, applicant_id: int, internship_id:
             INSERT INTO application_communications (
                 application_id, applicant_id, internship_id, communication_type,
                 recipient_email, subject, body, status, error_message, created_at, updated_at
-            ) VALUES (?, ?, ?, 'shortlist', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ) VALUES (%s, %s, %s, 'shortlist', %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id
             ''',
             (
                 application_id,
@@ -80,8 +81,9 @@ def _record_communication(application_id: int, applicant_id: int, internship_id:
                 error_message,
             ),
         )
+        comm_id = cursor.fetchone()['id']
         db.commit()
-        return db.execute('SELECT * FROM application_communications WHERE id = ?', (cursor.lastrowid,)).fetchone()
+        return db.execute('SELECT * FROM application_communications WHERE id = %s', (comm_id,)).fetchone()
 
 
 def trigger_shortlist_communication(application_id: int, provider_id: int | None = None, *, force_retry: bool = False):

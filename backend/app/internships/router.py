@@ -1,5 +1,6 @@
 from typing import Set
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
 from app.core.permissions import optional_user, require_roles
@@ -24,10 +25,11 @@ class ConnectionManager:
     async def broadcast(self, message: dict):
         if not self.active_connections:
             return
+        payload = jsonable_encoder(message)
         disconnected = set()
         for connection in list(self.active_connections):
             try:
-                await connection.send_json(message)
+                await connection.send_json(payload)
             except Exception:
                 disconnected.add(connection)
         for conn in disconnected:
@@ -116,7 +118,7 @@ def list_internships(query: str = '', status_filter: str = Query('', alias='stat
 async def create_internship(payload: InternshipInput, user=Depends(require_roles('provider'))):
     with get_db() as db:
         cursor = db.execute(
-            'INSERT INTO internships (provider_id, title, department, description, location, work_mode, duration, stipend, status, openings, deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO internships (provider_id, title, department, description, location, work_mode, duration, stipend, status, openings, deadline) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id',
             (
                 int(user['sub']),
                 payload.title.strip(),
@@ -131,14 +133,14 @@ async def create_internship(payload: InternshipInput, user=Depends(require_roles
                 payload.deadline,
             ),
         )
-        internship_id = cursor.lastrowid
+        internship_id = cursor.fetchone()['id']
         for raw_name in payload.skills[:20]:
             name = ' '.join(raw_name.strip().split())
             if not name:
                 continue
             skill_id, _ = get_or_create_skill(db, name)
             db.execute(
-                'INSERT OR IGNORE INTO internship_skills (internship_id, skill_id) VALUES (?, ?)',
+                'INSERT INTO internship_skills (internship_id, skill_id) VALUES (%s, %s) ON CONFLICT DO NOTHING',
                 (internship_id, skill_id),
             )
         db.commit()

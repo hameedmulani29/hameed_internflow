@@ -6,10 +6,10 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+from pydantic import BaseModel, Field
+from app.services.gemini_service import default_gemini_provider, default_key_manager
 
-GEMINI_API_KEY = os.getenv('INTERNFLOW_GEMINI_API_KEY')
-GEMINI_MODEL = os.getenv('INTERNFLOW_GEMINI_MODEL', 'gemini-2.0-flash')
+logger = logging.getLogger(__name__)
 
 
 class InterviewQuestionItem(BaseModel):
@@ -29,7 +29,6 @@ def generate_interview_questions_ai(
     skills: list[str],
     candidate_resume_text: str | None = None
 ) -> list[dict[str, Any]]:
-    api_key = GEMINI_API_KEY or os.getenv('GEMINI_API_KEY')
     skills_str = ", ".join(skills) if skills else "Software Engineering"
 
     prompt = f"""
@@ -56,7 +55,7 @@ Return a single JSON object with a key "questions" containing a list of 5 object
 Ensure the response is valid JSON.
 """.strip()
 
-    if not api_key:
+    if not default_key_manager.has_keys():
         # Fallback generator if API key is unconfigured
         return [
             {
@@ -79,16 +78,9 @@ Ensure the response is valid JSON.
             },
         ]
 
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent'
-    payload = {
-        'contents': [{'parts': [{'text': prompt}]}],
-        'generationConfig': {'temperature': 0.3},
-    }
-
     try:
-        res = httpx.post(url, params={'key': api_key}, json=payload, timeout=25.0)
-        res.raise_for_status()
-        raw_text = res.json()['candidates'][0]['content']['parts'][0]['text']
+        res_data = default_gemini_provider.generate_content(prompt, generation_config={'temperature': 0.3}, timeout=25.0)
+        raw_text = res_data['candidates'][0]['content']['parts'][0]['text']
 
         cleaned = raw_text.strip()
         if cleaned.startswith('```'):

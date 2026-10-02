@@ -55,11 +55,12 @@ def check_in(payload: AttendanceCheckInInput, token=Depends(require_roles('inter
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='You are already checked in for today.')
 
         cursor = db.execute(
-            'INSERT INTO attendance (intern_id, checked_in_at, status, notes, created_at) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO attendance (intern_id, checked_in_at, status, notes, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id',
             (intern, now, 'checked_in', payload.notes.strip() if payload.notes else None, now),
         )
+        att_id = cursor.fetchone()['id']
         db.commit()
-        row = db.execute('SELECT * FROM attendance WHERE id = ?', (cursor.lastrowid,)).fetchone()
+        row = db.execute('SELECT * FROM attendance WHERE id = %s', (att_id,)).fetchone()
     return {
         'id': row['id'],
         'intern_id': row['intern_id'],
@@ -125,5 +126,28 @@ def logs(token=Depends(require_roles('intern'))):
         rows = db.execute(
             'SELECT * FROM attendance WHERE intern_id = ? ORDER BY checked_in_at DESC LIMIT 30',
             (intern,),
+        ).fetchall()
+    return {'items': [_serialize_entry(row) for row in rows]}
+
+
+@router.get('/intern/{intern_id}')
+def intern_attendance_for_mentor(intern_id: int, token=Depends(require_roles('mentor'))):
+    """Recent attendance for an assigned intern (mentor monitoring view).
+
+    Mentor-scoped: the intern must have an active assignment with the
+    requesting mentor, otherwise 403. Reuses the same attendance records —
+    no duplicate attendance system.
+    """
+    mentor = int(token['sub'])
+    with get_db() as db:
+        assignment = db.execute(
+            "SELECT id FROM mentor_assignments WHERE mentor_id = ? AND intern_id = ? AND status = 'active'",
+            (mentor, intern_id),
+        ).fetchone()
+        if not assignment:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='This intern is not assigned to you.')
+        rows = db.execute(
+            'SELECT * FROM attendance WHERE intern_id = ? ORDER BY checked_in_at DESC LIMIT 14',
+            (intern_id,),
         ).fetchall()
     return {'items': [_serialize_entry(row) for row in rows]}

@@ -10,10 +10,9 @@ import {
   ShieldCheck,
   Sparkles,
   ArrowLeft,
-  AlertCircle,
-  RefreshCw
+  AlertCircle
 } from 'lucide-react';
-import { fetchMyApplication } from '../../services/internService';
+import { fetchMyApplication, fetchMyApplications } from '../../services/internService';
 import '../../components/common/SkillChip.css';
 import '../../styles/InternWorkspace.css';
 
@@ -61,18 +60,29 @@ export default function ApplicationTrackingPage({ applicationId, onNavigate }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const loadApplication = () => {
+  const loadApplication = async () => {
     setIsLoading(true);
     setError('');
-    fetchMyApplication(applicationId)
-      .then((data) => {
-        setApp(data);
-      })
-      .catch((requestError) => {
-        setError(requestError?.message || 'Could not load this application.');
-        setApp(null);
-      })
-      .finally(() => setIsLoading(false));
+    try {
+      let targetId = applicationId;
+      if (!targetId || targetId === 'null' || targetId === 'undefined') {
+        const apps = await fetchMyApplications();
+        if (Array.isArray(apps) && apps.length > 0) {
+          targetId = apps[0].id;
+        } else {
+          setApp(null);
+          setIsLoading(false);
+          return;
+        }
+      }
+      const data = await fetchMyApplication(targetId);
+      setApp(data);
+    } catch (requestError) {
+      setError(requestError?.message || 'Could not load this application.');
+      setApp(null);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -101,13 +111,53 @@ export default function ApplicationTrackingPage({ applicationId, onNavigate }) {
             <span>Back to Dashboard</span>
           </button>
         </div>
+        <div
+          className="floating-info-popup animate-fade-in"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(245, 158, 11, 0.15)',
+            borderRadius: '16px',
+            padding: '18px 22px',
+            marginBottom: '24px',
+            backdropFilter: 'blur(12px)',
+          }}
+        >
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '12px',
+              background: 'rgba(245, 158, 11, 0.15)',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#f59e0b',
+              flexShrink: 0,
+            }}
+          >
+            <FileCheck size={24} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h4 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 600, color: '#f8fafc' }}>
+              No Active Applications Found
+            </h4>
+            <p style={{ margin: '4px 0 0', fontSize: '0.86rem', color: '#94a3b8' }}>
+              You have not submitted any internship applications yet. Explore available opportunities to start your application journey and track your progression here.
+            </p>
+          </div>
+        </div>
         <div className="glass-card empty-state-card animate-fade-in">
-          <AlertCircle size={40} className="empty-icon text-cyan" />
-          <h3>Application unavailable</h3>
-          <p>{error || 'This application could not be found.'}</p>
-          <button className="btn btn-primary glass-btn-primary" onClick={loadApplication}>
-            <RefreshCw size={16} />
-            <span>Retry</span>
+          <FileCheck size={44} className="empty-icon text-cyan" />
+          <h3>Application Tracking</h3>
+          <p>Once you apply to an internship, your application status, AI screening results, and stage progression will appear here live.</p>
+          <button className="btn btn-primary glass-btn-primary" onClick={() => onNavigate('/intern/explore')}>
+            <Sparkles size={16} />
+            <span>Explore Internships</span>
           </button>
         </div>
       </div>

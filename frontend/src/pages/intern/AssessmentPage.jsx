@@ -13,7 +13,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
-import { fetchMyApplication } from '../../services/internService';
+import { fetchMyApplication, fetchMyApplications } from '../../services/internService';
 import {
   getAvailableAssessment,
   fetchAssessmentDetail,
@@ -89,10 +89,22 @@ export default function AssessmentPage({ applicationId, onNavigate }) {
     setError('');
     autoSubmitRef.current = false;
     try {
-      const appData = await fetchMyApplication(applicationId);
+      let targetId = applicationId;
+      if (!targetId || targetId === 'null' || targetId === 'undefined') {
+        const apps = await fetchMyApplications();
+        if (Array.isArray(apps) && apps.length > 0) {
+          targetId = apps[0].id;
+        } else {
+          setApp(null);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      const appData = await fetchMyApplication(targetId);
       setApp(appData);
 
-      const avail = await getAvailableAssessment(applicationId);
+      const avail = await getAvailableAssessment(targetId);
       setAssessmentData(avail.assessment);
 
       if (avail.assessment?.id) {
@@ -118,7 +130,7 @@ export default function AssessmentPage({ applicationId, onNavigate }) {
         if (avail.existing_attempt.status === 'in_progress') {
           // Resume the existing attempt: reload server-derived remaining time
           // so a refresh can never reset or extend the attempt clock.
-          const res = await startAssessmentAttempt(avail.assessment.id, applicationId);
+          const res = await startAssessmentAttempt(avail.assessment.id, targetId);
           const loadedQuestions = res.questions || [];
           // Restore the local draft BEFORE committing attemptId, otherwise the
           // persistence effect would overwrite the draft with empty responses.
@@ -254,7 +266,7 @@ export default function AssessmentPage({ applicationId, onNavigate }) {
     );
   }
 
-  if (error && !app) {
+  if (error || !app) {
     return (
       <div className="intern-page-container container">
         <div className="details-nav-row animate-fade-in">
@@ -263,13 +275,53 @@ export default function AssessmentPage({ applicationId, onNavigate }) {
             <span>Back to Dashboard</span>
           </button>
         </div>
+        <div
+          className="floating-info-popup animate-fade-in"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))',
+            border: '1px solid rgba(99, 102, 241, 0.4)',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(99, 102, 241, 0.15)',
+            borderRadius: '16px',
+            padding: '18px 22px',
+            marginBottom: '24px',
+            backdropFilter: 'blur(12px)',
+          }}
+        >
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '12px',
+              background: 'rgba(99, 102, 241, 0.15)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#818cf8',
+              flexShrink: 0,
+            }}
+          >
+            <BrainCircuit size={24} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h4 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 600, color: '#f8fafc' }}>
+              No Technical Assessment Available
+            </h4>
+            <p style={{ margin: '4px 0 0', fontSize: '0.86rem', color: '#94a3b8' }}>
+              You have not applied to any internships yet. Explore opportunities and apply to get shortlisted for technical assessments.
+            </p>
+          </div>
+        </div>
         <div className="glass-card empty-state-card animate-fade-in">
-          <AlertCircle size={40} className="empty-icon text-cyan" />
-          <h3>Assessment unavailable</h3>
-          <p>{error}</p>
-          <button className="btn btn-primary glass-btn-primary" onClick={loadAll}>
-            <RefreshCw size={16} />
-            <span>Retry</span>
+          <BrainCircuit size={44} className="empty-icon text-indigo" />
+          <h3>Technical Assessment Stage</h3>
+          <p>When you apply to an internship and get shortlisted by the provider, your technical test will appear here automatically.</p>
+          <button className="btn btn-primary glass-btn-primary" onClick={() => onNavigate('/intern/explore')}>
+            <Sparkles size={16} />
+            <span>Explore Internships</span>
           </button>
         </div>
       </div>

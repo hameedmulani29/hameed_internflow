@@ -16,22 +16,24 @@ def setup_database():
 
 def create_user_and_token(email: str, role: str, full_name: str = "Test User"):
     with get_db() as db:
-        db.execute("DELETE FROM users WHERE email = ?", (email,))
-        cursor = db.execute(
-            "INSERT INTO users (full_name, email, password_hash, role) VALUES (?, ?, 'hash', ?)",
+        db.execute(
+            "INSERT INTO users (full_name, email, password_hash, role) VALUES (?, ?, 'hash', ?) ON CONFLICT (email) DO NOTHING",
             (full_name, email, role),
         )
+        row = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
         db.commit()
-        user_id = cursor.lastrowid
+        user_id = row[0]
     token = create_token(user_id, role)
     return user_id, {"Authorization": f"Bearer {token}"}
 
 
 def setup_internship_and_assignment():
-    provider_id, provider_headers = create_user_and_token("provider_p2@co.in", "provider", "P2 Provider")
-    mentor_id, mentor_headers = create_user_and_token("mentor_p2@co.in", "mentor", "P2 Mentor")
-    intern1_id, intern1_headers = create_user_and_token("intern1_p2@co.in", "intern", "Intern Alpha")
-    intern2_id, intern2_headers = create_user_and_token("intern2_p2@co.in", "intern", "Intern Beta")
+    import uuid
+    suffix = uuid.uuid4().hex[:8]
+    provider_id, provider_headers = create_user_and_token(f"provider_p2_{suffix}@co.in", "provider", "P2 Provider")
+    mentor_id, mentor_headers = create_user_and_token(f"mentor_p2_{suffix}@co.in", "mentor", "P2 Mentor")
+    intern1_id, intern1_headers = create_user_and_token(f"intern1_p2_{suffix}@co.in", "intern", "Intern Alpha")
+    intern2_id, intern2_headers = create_user_and_token(f"intern2_p2_{suffix}@co.in", "intern", "Intern Beta")
 
     # Create internship
     resp = client.post(

@@ -12,13 +12,13 @@ def setup_db():
 
 def test_full_completion_verified_skills_passport_certificate_and_public_verification():
     with get_db() as db:
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role, organization) VALUES ('Tech Corp Provider', 'prov-outcome@test.com', 'hash', 'provider', 'TechCorp')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role, organization) VALUES ('Tech Corp Provider', 'prov-outcome@test.com', 'hash', 'provider', 'TechCorp') ON CONFLICT (email) DO NOTHING")
         p_id = db.execute("SELECT id FROM users WHERE email='prov-outcome@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Mentor Alex', 'mentor-outcome@test.com', 'hash', 'mentor')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mentor Alex', 'mentor-outcome@test.com', 'hash', 'mentor') ON CONFLICT (email) DO NOTHING")
         m_id = db.execute("SELECT id FROM users WHERE email='mentor-outcome@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Intern Sarah', 'sarah-outcome@test.com', 'hash', 'intern')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Intern Sarah', 'sarah-outcome@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING")
         i_id = db.execute("SELECT id FROM users WHERE email='sarah-outcome@test.com'").fetchone()[0]
 
         cursor = db.execute("INSERT INTO internships (provider_id, title, department, description, location, work_mode, duration, stipend, status) VALUES (?, 'Fullstack Developer Intern', 'Eng', 'Desc', 'Remote', 'Remote', '3m', '15k', 'published')", (p_id,))
@@ -28,7 +28,7 @@ def test_full_completion_verified_skills_passport_certificate_and_public_verific
         assignment_id = cur_a.lastrowid
 
         # Insert skill & evidence
-        db.execute("INSERT OR IGNORE INTO skills (name) VALUES ('python')")
+        db.execute("INSERT INTO skills (name) VALUES ('python') ON CONFLICT (name) DO NOTHING")
         py_id = db.execute("SELECT id FROM skills WHERE name='python'").fetchone()[0]
         db.execute("INSERT INTO candidate_skills (intern_id, skill_id, source) VALUES (?, ?, 'assessment')", (i_id, py_id))
         db.execute("INSERT INTO skill_evidence (candidate_id, skill_id, source_type, score, level, title) VALUES (?, ?, 'assessment', 85, 'proficient', 'Assessment Evidence')", (i_id, py_id))

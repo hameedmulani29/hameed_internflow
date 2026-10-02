@@ -8,11 +8,9 @@ import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from app.services.webhook_service import emit_weekly_report_generated_event
+from app.services.gemini_service import default_gemini_provider, default_key_manager
 
 logger = logging.getLogger(__name__)
-
-GEMINI_API_KEY = os.getenv('INTERNFLOW_GEMINI_API_KEY') or os.getenv('GEMINI_API_KEY')
-GEMINI_MODEL = os.getenv('INTERNFLOW_GEMINI_MODEL', 'gemini-2.0-flash')
 
 
 class WeeklyReportAIResult(BaseModel):
@@ -236,8 +234,7 @@ def generate_fallback_report(data: dict[str, Any]) -> dict[str, Any]:
 
 def call_gemini_weekly_report(data: dict[str, Any]) -> dict[str, Any]:
     """#19 — Calls Gemini AI to generate a structured weekly progress report."""
-    api_key = GEMINI_API_KEY
-    if not api_key:
+    if not default_key_manager.has_keys():
         logger.info("[Weekly Report AI] Gemini API key not set. Using deterministic fallback generator.")
         return generate_fallback_report(data)
 
@@ -277,24 +274,12 @@ JSON Output Schema:
 }}
 """.strip()
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
-    payload = {
-        'contents': [{'parts': [{'text': prompt}]}],
-        'generationConfig': {
-            'temperature': 0.2,
-            'responseMimeType': 'application/json',
-        },
-    }
-
     try:
-        with httpx.Client(timeout=20.0) as client:
-            response = client.post(url, json=payload)
-        
-        if response.status_code != 200:
-            logger.warning(f"[Weekly Report AI] Gemini HTTP {response.status_code}. Falling back.")
-            return generate_fallback_report(data)
-
-        res_data = response.json()
+        res_data = default_gemini_provider.generate_content(
+            prompt,
+            generation_config={'temperature': 0.2, 'responseMimeType': 'application/json'},
+            timeout=20.0,
+        )
         raw_text = res_data['candidates'][0]['content']['parts'][0]['text']
         parsed = _extract_json_from_text(raw_text)
         validated = WeeklyReportAIResult.model_validate(parsed)

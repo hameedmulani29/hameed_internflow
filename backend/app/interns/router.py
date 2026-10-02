@@ -1,12 +1,40 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field
 
 from app.core.permissions import require_roles
+from app.core.security import decode_token_str
 from app.db import get_db
 from app.services.activity_service import record_and_broadcast_activity
 from app.skills.router import get_or_create_skill
+from app.websocket.manager import intern_manager
 
 router = APIRouter(prefix='/api/interns', tags=['intern'])
+
+
+@router.websocket('/ws')
+async def intern_websocket(websocket: WebSocket, token: str | None = Query(None)):
+    """Authenticated WebSocket endpoint for intern real-time updates.
+
+    Mirrors the mentor monitoring socket: only intern-role tokens are
+    accepted; activity events fanned out via intern_manager (task assigned,
+    status changes, submission reviews, mentor feedback) reach the intern
+    without a page refresh.
+    """
+    if not token:
+        await websocket.close(code=4001)
+        return
+    payload = decode_token_str(token)
+    if not payload or payload.get('role') != 'intern':
+        await websocket.close(code=4001)
+        return
+
+    my_id = int(payload.get('sub'))
+    await intern_manager.connect(websocket, my_id)
+    try:
+        while True:
+            await websocket.receive_text()
+    except (WebSocketDisconnect, Exception):
+        intern_manager.disconnect(websocket, my_id)
 
 
 class InternSkillsInput(BaseModel):
@@ -109,10 +137,12 @@ def get_workspace(token=Depends(require_roles('intern'))):
                       u.full_name AS mentor_name, u.email AS mentor_email,
                       i.title AS internship_title, i.status AS internship_status,
                       i.department, i.location, i.work_mode, i.duration, i.stipend,
-                      i.deadline
+                      i.deadline, i.description AS internship_description,
+                      prov.organization AS organization_name, prov.full_name AS provider_name
                FROM mentor_assignments ma
                LEFT JOIN users u ON u.id = ma.mentor_id
                LEFT JOIN internships i ON i.id = ma.internship_id
+               LEFT JOIN users prov ON prov.id = i.provider_id
                WHERE ma.intern_id = ? AND ma.status = 'active'
                ORDER BY ma.created_at DESC
                LIMIT 1''',
@@ -157,6 +187,8 @@ def get_workspace(token=Depends(require_roles('intern'))):
             'duration': assignment['duration'],
             'stipend': assignment['stipend'],
             'deadline': assignment['deadline'],
+            'description': assignment['internship_description'],
+            'organization': assignment['organization_name'] or assignment['provider_name'],
         }
 
     task_summary = {
@@ -298,7 +330,7 @@ def mark_feedback_as_read(feedback_id: int, token=Depends(require_roles('intern'
             raise HTTPException(status_code=404, detail='Feedback not found.')
 
         db.execute(
-            'UPDATE mentor_feedback SET is_read = 1, read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = ? AND intern_id = ?',
+            'UPDATE mentor_feedback SET is_read = 1, read_at = COALESCE(read_at, (CURRENT_TIMESTAMP)::text) WHERE id = ? AND intern_id = ?',
             (feedback_id, intern),
         )
         db.commit()
@@ -431,10 +463,11 @@ async def submit_task(task_id: int, payload: InternTaskSubmissionInput, token=De
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail='A submission already exists for this task.')
 
         cursor = db.execute(
-            'INSERT INTO task_submissions (task_id, intern_id, content, status, submitted_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+            'INSERT INTO task_submissions (task_id, intern_id, content, status, submitted_at) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id',
             (task_id, intern, content, 'pending'),
         )
-        db.execute('UPDATE mentor_tasks SET status = ? WHERE id = ?', ('submitted', task_id))
+        sub_id = cursor.fetchone()['id']
+        db.execute('UPDATE mentor_tasks SET status = %s WHERE id = %s', ('submitted', task_id))
         await record_and_broadcast_activity(
             db,
             actor_id=intern,
@@ -449,7 +482,7 @@ async def submit_task(task_id: int, payload: InternTaskSubmissionInput, token=De
             metadata={'status': 'submitted'},
         )
         db.commit()
-        submission = db.execute('SELECT * FROM task_submissions WHERE id = ?', (cursor.lastrowid,)).fetchone()
+        submission = db.execute('SELECT * FROM task_submissions WHERE id = %s', (sub_id,)).fetchone()
     return {
         'id': submission['id'],
         'task_id': task_id,

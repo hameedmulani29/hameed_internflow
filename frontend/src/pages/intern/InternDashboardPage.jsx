@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Compass,
   FileCheck,
+  GraduationCap,
   ArrowRight,
   Clock,
   Building2,
@@ -13,6 +14,7 @@ import {
   FolderKanban,
   MessageSquare,
   Play,
+  Radio,
   X,
   LifeBuoy,
   Target,
@@ -25,12 +27,12 @@ import {
   fetchMyApplications,
   fetchInternWorkspace,
   fetchInternAttendanceToday,
-  submitInternTask,
   updateInternTaskStatus,
   checkInInternAttendance,
   checkOutInternAttendance,
 } from '../../services/internService';
-import { subscribeToInternships } from '../../services/realtimeService';
+import { subscribeToInternships, subscribeToInternEvents } from '../../services/realtimeService';
+import TaskSubmitModal from '../../components/intern/TaskSubmitModal';
 import { fetchUnreadFeedback, markFeedbackAsRead, submitMentorFeedback } from '../../services/mentorFeedbackService';
 import { fetchMyWeeklyReports } from '../../services/phase20Service';
 import FeedbackNotificationModal from '../../components/intern/FeedbackNotificationModal';
@@ -82,9 +84,9 @@ export default function InternDashboardPage({ onNavigate }) {
   const [filterCategory, setFilterCategory] = useState('all'); // 'all' | 'today' | 'upcoming' | 'overdue' | 'submitted' | 'completed'
   const [selectedDetailTask, setSelectedDetailTask] = useState(null);
   const [showTaskModal, setShowTaskModal] = useState(false);
-  const [taskDraft, setTaskDraft] = useState({ taskId: '', content: '', repo_url: '', demo_url: '', notes: '' });
-  const [isSubmittingTask, setIsSubmittingTask] = useState(false);
-  const [taskError, setTaskError] = useState('');
+  const [submitTaskId, setSubmitTaskId] = useState('');
+  const [wsConnection, setWsConnection] = useState('connecting');
+  const [latestEvent, setLatestEvent] = useState(null);
   const [attendanceBusy, setAttendanceBusy] = useState(false);
   const [attendanceMessage, setAttendanceMessage] = useState('');
   const [clockTick, setClockTick] = useState(() => Date.now());
@@ -121,8 +123,8 @@ export default function InternDashboardPage({ onNavigate }) {
       const result = await fetchInternWorkspace();
       setWorkspace(result);
       setTasks(result?.tasks || []);
-      if (result?.tasks?.length && !taskDraft.taskId) {
-        setTaskDraft((current) => ({ ...current, taskId: String(result.tasks[0].id) }));
+      if (result?.tasks?.length) {
+        setSubmitTaskId((current) => current || String(result.tasks[0].id));
       }
     } catch {
       setWorkspace(null);
@@ -202,9 +204,31 @@ export default function InternDashboardPage({ onNavigate }) {
       },
     });
 
+    // Intern realtime channel: mentor actions on this intern's work update
+    // the dashboard without a manual refresh. Only structural events trigger
+    // a refetch — status-only events are covered by local updates.
+    const unsubscribeInternEvents = subscribeToInternEvents({
+      onConnect: () => setWsConnection('live'),
+      onDisconnect: () => setWsConnection((prev) => (prev === 'offline' ? prev : 'connecting')),
+      onReconnect: () => {
+        loadWorkspace();
+        loadAttendance();
+      },
+      onEvent: (event) => {
+        const type = event?.type || '';
+        if (!type) return;
+        setLatestEvent(event);
+        if (type === 'task.assigned' || type === 'task.completed' || type === 'task.changes_requested') {
+          loadWorkspace();
+        }
+        setLatestEvent(event);
+      },
+    });
+
     const timer = setInterval(() => setClockTick(Date.now()), 60000);
     return () => {
       unsubscribe();
+      unsubscribeInternEvents();
       clearInterval(timer);
     };
   }, []);
@@ -234,35 +258,10 @@ export default function InternDashboardPage({ onNavigate }) {
     }
   };
 
-  const handleTaskSubmit = async (event) => {
-    event.preventDefault();
-    if (!taskDraft.taskId) {
-      setTaskError('Please select a task to submit.');
-      return;
-    }
-    if (!taskDraft.content.trim() || taskDraft.content.trim().length < 10) {
-      setTaskError('Please write at least 10 characters summarizing your work.');
-      return;
-    }
-
-    setIsSubmittingTask(true);
-    setTaskError('');
-    try {
-      await submitInternTask(Number(taskDraft.taskId), {
-        content: taskDraft.content.trim(),
-        repo_url: taskDraft.repo_url.trim() || undefined,
-        demo_url: taskDraft.demo_url.trim() || undefined,
-        notes: taskDraft.notes.trim() || undefined,
-      });
-      setShowTaskModal(false);
-      setSelectedDetailTask(null);
-      setTaskDraft({ taskId: '', content: '', repo_url: '', demo_url: '', notes: '' });
-      await loadWorkspace();
-    } catch (error) {
-      setTaskError(error.message || 'Failed to submit task. Please check your network connection.');
-    } finally {
-      setIsSubmittingTask(false);
-    }
+  const handleTaskSubmitted = () => {
+    // TaskSubmitModal owns submission; refresh the workspace so counts,
+    // filters, and the orchestration strip reflect the new state instantly.
+    loadWorkspace();
   };
 
   const handleBlockerSubmit = async (event) => {
@@ -365,6 +364,21 @@ export default function InternDashboardPage({ onNavigate }) {
             <span className="tag-pill" style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}>
               Today: {formatMinutes(todayWorkMinutes)}
             </span>
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() => onNavigate && onNavigate('/intern/internship')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              <GraduationCap size={14} />
+              <span>Internship workspace</span>
+            </button>
+            <span
+              title={wsConnection === 'live' ? 'Live updates connected' : 'Reconnecting to live updates — data stays available'}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: wsConnection === 'live' ? '#16a34a' : '#d97706', border: '1px solid currentColor', borderRadius: '12px', padding: '3px 9px' }}
+              role="status"
+            >
+              <Radio size={11} /> {wsConnection === 'live' ? 'Live' : 'Reconnecting…'}
+            </span>
           </div>
         )}
       </section>
@@ -372,6 +386,12 @@ export default function InternDashboardPage({ onNavigate }) {
       {attendanceMessage && (
         <div className="alert-banner info animate-fade-in" style={{ marginTop: '0.5rem' }}>
           <span>{attendanceMessage}</span>
+        </div>
+      )}
+
+      {latestEvent && (
+        <div className="alert-banner info animate-fade-in" style={{ marginTop: '0.5rem' }} role="status">
+          <span><strong>Live update:</strong> {latestEvent.description || latestEvent.title}</span>
         </div>
       )}
 
@@ -550,7 +570,7 @@ export default function InternDashboardPage({ onNavigate }) {
                     onOpenDetails={() => setSelectedDetailTask(task)}
                     onStart={() => handleTaskStatusUpdate(task.id, 'in_progress')}
                     onSubmitWork={() => {
-                      setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                      setSubmitTaskId(String(task.id));
                       setShowTaskModal(true);
                     }}
                   />
@@ -594,7 +614,7 @@ export default function InternDashboardPage({ onNavigate }) {
                         onOpenDetails={() => setSelectedDetailTask(task)}
                         onStart={() => handleTaskStatusUpdate(task.id, 'in_progress')}
                         onSubmitWork={() => {
-                          setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                          setSubmitTaskId(String(task.id));
                           setShowTaskModal(true);
                         }}
                       />
@@ -623,7 +643,7 @@ export default function InternDashboardPage({ onNavigate }) {
                         onOpenDetails={() => setSelectedDetailTask(task)}
                         onStart={() => handleTaskStatusUpdate(task.id, 'in_progress')}
                         onSubmitWork={() => {
-                          setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                          setSubmitTaskId(String(task.id));
                           setShowTaskModal(true);
                         }}
                       />
@@ -651,7 +671,7 @@ export default function InternDashboardPage({ onNavigate }) {
                         onOpenDetails={() => setSelectedDetailTask(task)}
                         onStart={() => handleTaskStatusUpdate(task.id, 'in_progress')}
                         onSubmitWork={() => {
-                          setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                          setSubmitTaskId(String(task.id));
                           setShowTaskModal(true);
                         }}
                       />
@@ -674,7 +694,7 @@ export default function InternDashboardPage({ onNavigate }) {
                         task={task}
                         onOpenDetails={() => setSelectedDetailTask(task)}
                         onSubmitWork={() => {
-                          setTaskDraft((curr) => ({ ...curr, taskId: String(task.id) }));
+                          setSubmitTaskId(String(task.id));
                           setShowTaskModal(true);
                         }}
                       />
@@ -716,11 +736,11 @@ export default function InternDashboardPage({ onNavigate }) {
             setSelectedDetailTask(null);
           }}
           onSubmitOpen={() => {
-            setTaskDraft((curr) => ({ ...curr, taskId: String(selectedDetailTask.id) }));
+            setSubmitTaskId(String(selectedDetailTask.id));
             setShowTaskModal(true);
           }}
           onReportBlocker={() => {
-            setTaskDraft((curr) => ({ ...curr, taskId: String(selectedDetailTask.id) }));
+            setSubmitTaskId(String(selectedDetailTask.id));
             setSelectedDetailTask(null);
             setBlockerDraft((current) => ({ ...current, affected: String(selectedDetailTask.id) }));
             setBlockerModalOpen(true);
@@ -728,63 +748,14 @@ export default function InternDashboardPage({ onNavigate }) {
         />
       )}
 
-      {/* TASK SUBMISSION MODAL */}
-      {showTaskModal && typeof document !== 'undefined' && createPortal(
-        <div className="modal-backdrop" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: 'rgba(8, 12, 24, 0.75)', backdropFilter: 'blur(8px)', display: 'grid', placeItems: 'center', zIndex: 99999 }} onClick={() => setShowTaskModal(false)}>
-          <div className="glass-card" style={{ width: 'min(640px, calc(100vw - 2rem))', padding: '1.5rem', background: '#ffffff', color: '#0f172a', border: '1px solid #e2e8f0', boxShadow: '0 20px 30px rgba(0,0,0,0.25)', borderRadius: '16px' }} onClick={(event) => event.stopPropagation()}>
-            <div className="section-header" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 className="section-title" style={{ fontSize: '1.2rem', color: '#0f172a' }}>Submit Task Work</h3>
-                <p className="section-subtitle" style={{ color: '#64748b' }}>Share progress, repository links, and notes for your mentor.</p>
-              </div>
-              <button type="button" onClick={() => setShowTaskModal(false)} style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer' }}><X size={18} /></button>
-            </div>
-
-            <form onSubmit={handleTaskSubmit}>
-              <div style={{ display: 'grid', gap: '0.9rem' }}>
-                <label style={{ display: 'grid', gap: '0.3rem' }}>
-                  <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Task *</span>
-                  <select value={taskDraft.taskId} onChange={(event) => setTaskDraft((current) => ({ ...current, taskId: event.target.value }))} style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem' }}>
-                    {tasks.map((task) => (
-                      <option key={task.id} value={String(task.id)}>{task.title} ({task.status})</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label style={{ display: 'grid', gap: '0.3rem' }}>
-                  <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Summary *</span>
-                  <textarea value={taskDraft.content} onChange={(event) => setTaskDraft((current) => ({ ...current, content: event.target.value }))} rows={5} placeholder="Describe what you completed, implementation details, and outcomes of this task." style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem', resize: 'vertical' }} />
-                </label>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.9rem' }}>
-                  <label style={{ display: 'grid', gap: '0.3rem' }}>
-                    <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Repository URL</span>
-                    <input value={taskDraft.repo_url} onChange={(event) => setTaskDraft((current) => ({ ...current, repo_url: event.target.value }))} placeholder="https://github.com/your-repo" style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem' }} />
-                  </label>
-                  <label style={{ display: 'grid', gap: '0.3rem' }}>
-                    <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Demo URL</span>
-                    <input value={taskDraft.demo_url} onChange={(event) => setTaskDraft((current) => ({ ...current, demo_url: event.target.value }))} placeholder="https://demo.example.com" style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem' }} />
-                  </label>
-                </div>
-
-                <label style={{ display: 'grid', gap: '0.3rem' }}>
-                  <span style={{ color: '#334155', fontWeight: 600, fontSize: '0.88rem' }}>Notes / Follow-ups</span>
-                  <textarea value={taskDraft.notes} onChange={(event) => setTaskDraft((current) => ({ ...current, notes: event.target.value }))} rows={2} placeholder="Add any context or questions for your mentor." style={{ borderRadius: '10px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', padding: '0.75rem', fontSize: '0.9rem', resize: 'vertical' }} />
-                </label>
-              </div>
-
-              {taskError && <p style={{ color: '#dc2626', marginTop: '0.75rem', fontSize: '0.85rem' }}>{taskError}</p>}
-
-              <div className="card-footer-actions" style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                <button type="button" className="btn btn-subtle btn-sm" onClick={() => setShowTaskModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary btn-sm" disabled={isSubmittingTask}>
-                  {isSubmittingTask ? 'Submitting...' : 'Submit Deliverable'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body
+      {/* TASK SUBMISSION MODAL (shared component) */}
+      {showTaskModal && (
+        <TaskSubmitModal
+          tasks={tasks}
+          initialTaskId={submitTaskId}
+          onClose={() => setShowTaskModal(false)}
+          onSubmitted={handleTaskSubmitted}
+        />
       )}
 
       {/* Live Internship Recommendations */}

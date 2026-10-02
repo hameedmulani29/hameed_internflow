@@ -12,10 +12,10 @@ def setup_db():
 
 def test_goals_milestones_observations_final_eval():
     with get_db() as db:
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Mentor M', 'mentor-p20@test.com', 'hash', 'mentor')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mentor M', 'mentor-p20@test.com', 'hash', 'mentor') ON CONFLICT (email) DO NOTHING")
         m_id = db.execute("SELECT id FROM users WHERE email='mentor-p20@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Intern Dev', 'intern-dev-p20@test.com', 'hash', 'intern')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Intern Dev', 'intern-dev-p20@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING")
         i_id = db.execute("SELECT id FROM users WHERE email='intern-dev-p20@test.com'").fetchone()[0]
 
         cur = db.execute("INSERT INTO mentor_assignments (mentor_id, intern_id, status) VALUES (?, ?, 'active')", (m_id, i_id))

@@ -24,10 +24,10 @@ def setup_db():
 
 def test_interview_scheduling_conflict_and_scorecard():
     with get_db() as db:
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Interviewer Prov', 'interviewer-p20@test.com', 'hash', 'provider')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Interviewer Prov', 'interviewer-p20@test.com', 'hash', 'provider') ON CONFLICT (email) DO NOTHING")
         p_id = db.execute("SELECT id FROM users WHERE email='interviewer-p20@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Cand 1', 'cand1-p20@test.com', 'hash', 'intern')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Cand 1', 'cand1-p20@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING")
         c1_id = db.execute("SELECT id FROM users WHERE email='cand1-p20@test.com'").fetchone()[0]
 
         cursor = db.execute("INSERT INTO internships (provider_id, title, department, description, location, work_mode, duration, stipend, status) VALUES (?, 'QA Lead', 'Eng', 'Desc', 'Remote', 'Remote', '3m', '10k', 'published')", (p_id,))

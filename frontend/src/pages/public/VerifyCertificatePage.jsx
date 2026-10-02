@@ -7,8 +7,19 @@ import '../../styles/VerifyCertificatePage.css';
 const VERIFY_STEPS = ['Checking certificate ID...', 'Authenticating record...'];
 
 export default function VerifyCertificatePage() {
-  const [certificateId, setCertificateId] = useState('');
-  const [phase, setPhase] = useState('idle'); // idle | verifying | verified | not-found
+  const getInitialCertificateId = () => {
+    const params = new URLSearchParams(window.location.search);
+    const queryId = params.get('certificate') || params.get('id');
+    const pathId = window.location.pathname.startsWith('/verify/')
+      ? decodeURIComponent(window.location.pathname.split('/verify/')[1])
+      : '';
+    return (queryId || pathId || '').trim();
+  };
+
+  const initialCertificateId = getInitialCertificateId();
+
+  const [certificateId, setCertificateId] = useState(initialCertificateId);
+  const [phase, setPhase] = useState(initialCertificateId ? 'verifying' : 'idle'); // idle | verifying | verified | not-found
   const [stepIndex, setStepIndex] = useState(0);
   const [record, setRecord] = useState(null);
   const reducedMotion = usePrefersReducedMotion();
@@ -17,28 +28,74 @@ export default function VerifyCertificatePage() {
   const preview = CERTIFICATE_PREVIEW;
   const inputInvalid = phase === 'not-found';
 
-  const handleVerify = async (e) => {
-    e.preventDefault();
-    if (!certificateId.trim() || phase === 'verifying') return;
+  const runVerification = async (nextCertificateId) => {
+    const cleanedId = nextCertificateId.trim();
+    if (!cleanedId) return;
 
+    setCertificateId(cleanedId);
     setPhase('verifying');
     setStepIndex(0);
 
-    // Advance step labels while "checking"
     const stepTimer = window.setInterval(() => {
       setStepIndex((i) => Math.min(i + 1, VERIFY_STEPS.length - 1));
     }, 450);
 
-    const result = await verifyCertificate(certificateId);
-    window.clearInterval(stepTimer);
+    try {
+      const result = await verifyCertificate(cleanedId);
+      window.clearInterval(stepTimer);
 
-    if (result.ok) {
-      setRecord(result.record);
-      setPhase('verified');
-    } else {
+      if (result.ok) {
+        setRecord(result.record);
+        setPhase('verified');
+      } else {
+        setRecord(null);
+        setPhase('not-found');
+      }
+    } catch {
+      window.clearInterval(stepTimer);
       setRecord(null);
       setPhase('not-found');
     }
+  };
+
+  useEffect(() => {
+    if (!initialCertificateId) return undefined;
+
+    let isMounted = true;
+    const stepTimer = window.setInterval(() => {
+      setStepIndex((i) => Math.min(i + 1, VERIFY_STEPS.length - 1));
+    }, 450);
+
+    verifyCertificate(initialCertificateId)
+      .then((result) => {
+        if (!isMounted) return;
+        window.clearInterval(stepTimer);
+
+        if (result.ok) {
+          setRecord(result.record);
+          setPhase('verified');
+        } else {
+          setRecord(null);
+          setPhase('not-found');
+        }
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        window.clearInterval(stepTimer);
+        setRecord(null);
+        setPhase('not-found');
+      });
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(stepTimer);
+    };
+  }, [initialCertificateId]);
+
+  const handleVerify = async (e) => {
+    e.preventDefault();
+    if (!certificateId.trim() || phase === 'verifying') return;
+    await runVerification(certificateId);
   };
 
   useEffect(() => {

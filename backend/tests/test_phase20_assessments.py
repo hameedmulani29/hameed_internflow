@@ -12,13 +12,13 @@ def setup_db():
 
 def test_assessment_server_side_scoring_and_evidence():
     with get_db() as db:
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Provider P', 'prov-p20@test.com', 'hash', 'provider')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Provider P', 'prov-p20@test.com', 'hash', 'provider') ON CONFLICT (email) DO NOTHING")
         p_id = db.execute("SELECT id FROM users WHERE email='prov-p20@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Intern I', 'intern-p20@test.com', 'hash', 'intern')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Intern I', 'intern-p20@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING")
         i_id = db.execute("SELECT id FROM users WHERE email='intern-p20@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO skills (name, category) VALUES ('python', 'Engineering')")
+        db.execute("INSERT INTO skills (name, category) VALUES ('python', 'Engineering') ON CONFLICT (name) DO NOTHING")
         py_id = db.execute("SELECT id FROM skills WHERE name='python'").fetchone()[0]
 
         q_cur = db.execute("INSERT INTO questions (question_text, type, skill_id, options, correct_answer) VALUES ('What is 2+2 in Python?', 'mcq', ?, '[\"3\", \"4\"]', '4')", (py_id,))

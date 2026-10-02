@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from app.websocket.manager import mentor_manager
+from app.websocket.manager import mentor_manager, intern_manager
 
 
 async def record_and_broadcast_activity(
@@ -23,10 +23,10 @@ async def record_and_broadcast_activity(
     cursor = db.execute(
         """INSERT INTO activity_events
            (actor_id, actor_role, event_type, mentor_id, intern_id, project_id, task_id, title, description, metadata, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (actor_id, actor_role, event_type, mentor_id, intern_id, project_id, task_id, title, description, meta_json, now_iso),
     )
-    activity_id = cursor.lastrowid
+    activity_id = cursor.fetchone()["id"]
 
     # Fetch names if not provided in metadata
     intern_name = None
@@ -68,6 +68,12 @@ async def record_and_broadcast_activity(
     }
 
     await mentor_manager.broadcast_to_mentor(mentor_id, payload)
+
+    # Fan out to the affected intern so their workspace updates in real time
+    # too (task assigned/started/submitted/completed, reviews, feedback).
+    if intern_id:
+        await intern_manager.broadcast_to_intern(intern_id, payload)
+
     return payload
 
 

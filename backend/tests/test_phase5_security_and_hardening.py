@@ -15,13 +15,13 @@ def setup_database():
 
 
 def _create_user(db, name, email, role):
-    db.execute("DELETE FROM users WHERE email = ?", (email,))
-    cursor = db.execute(
-        "INSERT INTO users (full_name, email, password_hash, role) VALUES (?, ?, 'hash', ?)",
+    db.execute(
+        "INSERT INTO users (full_name, email, password_hash, role) VALUES (?, ?, 'hash', ?) ON CONFLICT (email) DO NOTHING",
         (name, email, role),
     )
+    row = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
     db.commit()
-    return cursor.lastrowid
+    return row[0]
 
 
 def _create_internship(db, provider_id, title="Backend Engineering"):
@@ -140,10 +140,11 @@ def test_idor_mentor_cannot_access_other_mentor_project():
         provider_id = _create_user(db, "Provider Main", "prov.main@test.com", "provider")
         mentor1_id = _create_user(db, "Mentor 1 Proj", "m1.proj@test.com", "mentor")
         mentor2_id = _create_user(db, "Mentor 2 Proj", "m2.proj@test.com", "mentor")
+        intern_id = _create_user(db, "Intern Proj", "intern.proj@test.com", "intern")
         internship_id = _create_internship(db, provider_id)
 
         # Mentor 1 assignment & project
-        db.execute("INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (?, 999, ?, 'active')", (mentor1_id, internship_id))
+        db.execute("INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (?, ?, ?, 'active') ON CONFLICT (mentor_id, intern_id) DO NOTHING", (mentor1_id, intern_id, internship_id))
         cur = db.execute(
             "INSERT INTO projects (internship_id, mentor_id, title, status) VALUES (?, ?, 'Mentor 1 Project', 'active')",
             (internship_id, mentor1_id),
@@ -218,10 +219,11 @@ def test_websocket_unauthorized_role_rejected():
 
 def test_database_init_db_idempotency_and_preservation():
     with get_db() as db:
+        mentor_id = _create_user(db, "Idempotent Mentor", "idem.mentor@test.com", "mentor")
         user_id = _create_user(db, "Idempotent User", "idem@test.com", "intern")
         db.execute(
-            "INSERT INTO mentor_feedback (mentor_id, intern_id, feedback, is_read) VALUES (1, ?, 'Test Feedback', 0)",
-            (user_id,),
+            "INSERT INTO mentor_feedback (mentor_id, intern_id, feedback, is_read) VALUES (?, ?, 'Test Feedback', 0)",
+            (mentor_id, user_id),
         )
         db.commit()
 

@@ -37,13 +37,13 @@ def create_goal(payload: GoalInput, user=Depends(require_roles('mentor', 'provid
 
         cursor = db.execute(
             '''INSERT INTO internship_goals (assignment_id, intern_id, mentor_id, title, description, skill_id, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id''',
             (payload.assignment_id, intern_id, mentor_id, payload.title.strip(), payload.description, payload.skill_id, payload.status),
         )
-        goal_id = cursor.lastrowid
+        goal_id = cursor.fetchone()['id']
         db.commit()
 
-        row = db.execute('SELECT g.*, s.name AS skill_name FROM internship_goals g LEFT JOIN skills s ON s.id = g.skill_id WHERE g.id = ?', (goal_id,)).fetchone()
+        row = db.execute('SELECT g.*, s.name AS skill_name FROM internship_goals g LEFT JOIN skills s ON s.id = g.skill_id WHERE g.id = %s', (goal_id,)).fetchone()
     return dict(row)
 
 
@@ -160,13 +160,13 @@ def add_milestone(goal_id: int, payload: MilestoneInput, user=Depends(require_ro
             raise HTTPException(status_code=404, detail='Goal not found.')
 
         cursor = db.execute(
-            'INSERT INTO goal_milestones (goal_id, title, status, due_date) VALUES (?, ?, ?, ?)',
+            'INSERT INTO goal_milestones (goal_id, title, status, due_date) VALUES (%s, %s, %s, %s) RETURNING id',
             (goal_id, payload.title.strip(), payload.status, payload.due_date),
         )
-        milestone_id = cursor.lastrowid
+        milestone_id = cursor.fetchone()['id']
         db.commit()
 
-        row = db.execute('SELECT * FROM goal_milestones WHERE id = ?', (milestone_id,)).fetchone()
+        row = db.execute('SELECT * FROM goal_milestones WHERE id = %s', (milestone_id,)).fetchone()
     return dict(row)
 
 

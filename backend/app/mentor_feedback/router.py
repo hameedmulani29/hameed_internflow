@@ -15,6 +15,46 @@ from pydantic import BaseModel, Field
 
 from app.core.permissions import require_roles
 from app.db import get_db, seed_intern_demo_data, seed_mentor_demo_data
+from app.websocket.manager import mentor_manager
+
+
+def _parse_blocker_fields(message: str):
+    """Extract structured fields from the intern [Blocker] message convention."""
+    blocker_type = ''
+    affected_task = ''
+    for line in message.split('\n'):
+        if line.startswith('[Blocker] Type:'):
+            blocker_type = line.replace('[Blocker] Type:', '').strip()
+        elif line.startswith('Affected task:'):
+            affected_task = line.replace('Affected task:', '').strip()
+    return blocker_type, affected_task
+
+
+async def broadcast_blocker_report(mentor_id: int, record: dict):
+    """Push a blocker report to the mentor's real-time monitoring feed.
+
+    Uses the existing mentor WebSocket infrastructure; the event mirrors the
+    shape of activity events so existing consumers keep working.
+    """
+    blocker_type, affected_task = _parse_blocker_fields(record.get('message', ''))
+    event = {
+        'type': 'blocker.reported',
+        'title': 'Blocker Reported',
+        'description': f'{blocker_type or "Blocker"} reported'
+        + (f' — {affected_task}' if affected_task and affected_task != 'none specified' else ''),
+        'blocker': {
+            'id': record.get('id'),
+            'intern_id': record.get('intern_id'),
+            'intern_name': record.get('intern_name'),
+            'assignment_id': record.get('assignment_id'),
+            'type': blocker_type,
+            'affected_task': affected_task,
+            'message': record.get('message'),
+            'created_at': record.get('created_at'),
+        },
+        'created_at': record.get('created_at'),
+    }
+    await mentor_manager.broadcast_to_mentor(mentor_id, event)
 
 router = APIRouter(prefix='/api/mentor-feedback', tags=['mentor-feedback'])
 
@@ -75,7 +115,7 @@ def feedback_context(token=Depends(require_roles('intern'))):
 
 @router.post('', status_code=201)
 @router.post('/', status_code=201)
-def submit_feedback(payload: InternFeedbackInput, token=Depends(require_roles('intern'))):
+async def submit_feedback(payload: InternFeedbackInput, token=Depends(require_roles('intern'))):
     intern = int(token['sub'])
     message = payload.message.strip()
     if len(message) < 20:
@@ -86,11 +126,23 @@ def submit_feedback(payload: InternFeedbackInput, token=Depends(require_roles('i
         except ContextError as context_error:
             raise HTTPException(status_code=context_error.http_status, detail=context_error.detail) from context_error
         cursor = db.execute(
-            'INSERT INTO intern_mentor_feedback (assignment_id, mentor_id, intern_id, internship_id, feedback_type, rating, message) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO intern_mentor_feedback (assignment_id, mentor_id, intern_id, internship_id, feedback_type, rating, message) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id',
             (assignment['id'], assignment['mentor_id'], intern, assignment['internship_id'], payload.feedback_type, payload.rating, message),
         )
+        fb_id = cursor.fetchone()['id']
         db.commit()
-        created = db.execute('SELECT id, created_at FROM intern_mentor_feedback WHERE id = ?', (cursor.lastrowid,)).fetchone()
+        created = db.execute('SELECT id, created_at FROM intern_mentor_feedback WHERE id = %s', (fb_id,)).fetchone()
+        created = dict(created)
+        # Real-time: blocker reports push straight to the mentor's live feed.
+        if payload.feedback_type == 'other' and message.startswith('[Blocker]'):
+            await broadcast_blocker_report(assignment['mentor_id'], {
+                'id': created['id'],
+                'intern_id': intern,
+                'mentor_id': assignment['mentor_id'],
+                'assignment_id': assignment['id'],
+                'message': message,
+                'created_at': created['created_at'],
+            })
     return {
         'id': created['id'],
         'created_at': created['created_at'],

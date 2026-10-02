@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   Sparkles,
   AlertCircle,
-  RefreshCw,
   CheckCircle2,
   Calendar,
   Clock,
@@ -12,7 +11,7 @@ import {
   Award,
   Loader2
 } from 'lucide-react';
-import { fetchMyApplication } from '../../services/internService';
+import { fetchMyApplication, fetchMyApplications } from '../../services/internService';
 import { fetchApplicationInterview } from '../../services/phase20Service';
 import '../../styles/InternWorkspace.css';
 
@@ -40,10 +39,22 @@ export default function InterviewPage({ applicationId, onNavigate }) {
     setIsLoading(true);
     setError('');
     try {
-      const appRes = await fetchMyApplication(applicationId);
+      let targetId = applicationId;
+      if (!targetId || targetId === 'null' || targetId === 'undefined') {
+        const apps = await fetchMyApplications();
+        if (Array.isArray(apps) && apps.length > 0) {
+          targetId = apps[0].id;
+        } else {
+          setApp(null);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      const appRes = await fetchMyApplication(targetId);
       setApp(appRes);
 
-      const invRes = await fetchApplicationInterview(applicationId);
+      const invRes = await fetchApplicationInterview(targetId);
       if (invRes && invRes.has_interview) {
         setInterviewData(invRes.interview);
       } else {
@@ -80,13 +91,53 @@ export default function InterviewPage({ applicationId, onNavigate }) {
             <span>Back to Dashboard</span>
           </button>
         </div>
+        <div
+          className="floating-info-popup animate-fade-in"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '16px',
+            background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))',
+            border: '1px solid rgba(168, 85, 247, 0.4)',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(168, 85, 247, 0.15)',
+            borderRadius: '16px',
+            padding: '18px 22px',
+            marginBottom: '24px',
+            backdropFilter: 'blur(12px)',
+          }}
+        >
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '12px',
+              background: 'rgba(168, 85, 247, 0.15)',
+              border: '1px solid rgba(168, 85, 247, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#c084fc',
+              flexShrink: 0,
+            }}
+          >
+            <Video size={24} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <h4 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 600, color: '#f8fafc' }}>
+              No Interview Scheduled Yet
+            </h4>
+            <p style={{ margin: '4px 0 0', fontSize: '0.86rem', color: '#94a3b8' }}>
+              You have not applied to any internships yet. Explore opportunities and apply to advance through screening and interview stages.
+            </p>
+          </div>
+        </div>
         <div className="glass-card empty-state-card animate-fade-in">
-          <AlertCircle size={40} className="empty-icon text-cyan" />
-          <h3>Application unavailable</h3>
-          <p>{error || 'This application could not be found.'}</p>
-          <button className="btn btn-primary glass-btn-primary" onClick={loadData}>
-            <RefreshCw size={16} />
-            <span>Retry</span>
+          <Video size={44} className="empty-icon text-cyan" />
+          <h3>Interview Stage</h3>
+          <p>When you apply to an internship and reach the interview stage, your meeting schedule, interviewer name, and Join link will appear here.</p>
+          <button className="btn btn-primary glass-btn-primary" onClick={() => onNavigate('/intern/explore')}>
+            <Sparkles size={16} />
+            <span>Explore Internships</span>
           </button>
         </div>
       </div>
@@ -190,7 +241,13 @@ export default function InterviewPage({ applicationId, onNavigate }) {
             <p>
               Your application for <strong>{internship.title}</strong> is currently in stage <strong>{app.status}</strong>.
             </p>
-            <p className="sub-text">Once your provider schedules a date and time, the meeting details and Join link will appear here.</p>
+            <p className="sub-text">
+              {['applied', 'screening'].includes(app.status)
+                ? 'Your application is currently in screening. Interview scheduling unlocks once you pass screening and assessment stages.'
+                : app.status === 'shortlisted' || app.status === 'assessment'
+                ? 'You are advancing through selection stages. When your provider schedules an interview, the date, time, and Join meeting link will appear here automatically.'
+                : 'Once your provider schedules a date and time, the meeting details and Join link will appear here.'}
+            </p>
 
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', marginTop: '1rem' }}>
               <button className="btn btn-primary glass-btn-primary" onClick={() => onNavigate(`/intern/applications/${app.id}/track`)}>

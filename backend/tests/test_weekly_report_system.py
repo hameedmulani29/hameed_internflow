@@ -24,22 +24,22 @@ def test_weekly_report_full_pipeline():
     # 1. Seed Database Entities
     with get_db() as db:
         db.execute(
-            "INSERT OR IGNORE INTO users (full_name, email, password_hash, role, organization) VALUES ('Acme Corp Provider', 'prov-wk@test.com', 'hash', 'provider', 'Acme Corp')"
+            "INSERT INTO users (full_name, email, password_hash, role, organization) VALUES ('Acme Corp Provider', 'prov-wk@test.com', 'hash', 'provider', 'Acme Corp') ON CONFLICT (email) DO NOTHING"
         )
         provider_id = db.execute("SELECT id FROM users WHERE email='prov-wk@test.com'").fetchone()[0]
 
         db.execute(
-            "INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Mentor David', 'mentor-wk@test.com', 'hash', 'mentor')"
+            "INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mentor David', 'mentor-wk@test.com', 'hash', 'mentor') ON CONFLICT (email) DO NOTHING"
         )
         mentor_id = db.execute("SELECT id FROM users WHERE email='mentor-wk@test.com'").fetchone()[0]
 
         db.execute(
-            "INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Intern Carlos', 'carlos-wk@test.com', 'hash', 'intern')"
+            "INSERT INTO users (full_name, email, password_hash, role) VALUES ('Intern Carlos', 'carlos-wk@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING"
         )
         intern_a_id = db.execute("SELECT id FROM users WHERE email='carlos-wk@test.com'").fetchone()[0]
 
         db.execute(
-            "INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Intern Unauthorized', 'unauth-wk@test.com', 'hash', 'intern')"
+            "INSERT INTO users (full_name, email, password_hash, role) VALUES ('Intern Unauthorized', 'unauth-wk@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING"
         )
         intern_b_id = db.execute("SELECT id FROM users WHERE email='unauth-wk@test.com'").fetchone()[0]
 
@@ -50,7 +50,7 @@ def test_weekly_report_full_pipeline():
         internship_id = cursor.lastrowid
 
         db.execute(
-            "INSERT OR IGNORE INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (?, ?, ?, 'active')",
+            "INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (?, ?, ?, 'active') ON CONFLICT (mentor_id, intern_id) DO NOTHING",
             (mentor_id, intern_a_id, internship_id),
         )
         assignment_id = db.execute(

@@ -169,8 +169,7 @@ export default function InternFloatingOrb({ currentPath, onNavigate }) {
       id: 'track',
       name: 'Tracking',
       icon: FileCheck,
-      // No application yet → the dashboard's empty state explains next steps.
-      path: activeAppId ? `/intern/applications/${activeAppId}/track` : '/intern/dashboard',
+      path: activeAppId ? `/intern/applications/${activeAppId}/track` : '/intern/track',
       isActive: currentPath.includes('/track') || currentPath.includes('/submitted') || currentPath.includes('/apply'),
       colorClass: 'radial-amber'
     },
@@ -178,7 +177,7 @@ export default function InternFloatingOrb({ currentPath, onNavigate }) {
       id: 'assessment',
       name: 'Assessment',
       icon: BrainCircuit,
-      path: activeAppId ? `/intern/applications/${activeAppId}/assessment` : '/intern/dashboard',
+      path: activeAppId ? `/intern/applications/${activeAppId}/assessment` : '/intern/assessment',
       isActive: currentPath.includes('/assessment'),
       colorClass: 'radial-indigo'
     },
@@ -186,7 +185,7 @@ export default function InternFloatingOrb({ currentPath, onNavigate }) {
       id: 'interview',
       name: 'Interview',
       icon: Video,
-      path: activeAppId ? `/intern/applications/${activeAppId}/interview` : '/intern/dashboard',
+      path: activeAppId ? `/intern/applications/${activeAppId}/interview` : '/intern/interview',
       isActive: currentPath.includes('/interview'),
       colorClass: 'radial-purple'
     },

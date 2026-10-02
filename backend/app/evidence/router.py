@@ -53,10 +53,10 @@ def record_mentor_observation(payload: ObservationInput, user=Depends(require_ro
         # Insert mentor_skill_observations
         cursor = db.execute(
             '''INSERT INTO mentor_skill_observations (mentor_id, intern_id, task_id, skill_id, level, note)
-               VALUES (?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id''',
             (mentor_id, payload.intern_id, payload.task_id, skill_id, payload.level, payload.note),
         )
-        obs_id = cursor.lastrowid
+        obs_id = cursor.fetchone()['id']
 
         # Insert into skill_evidence
         level_score_map = {'emerging': 60, 'developing': 75, 'proficient': 88, 'strong': 98}

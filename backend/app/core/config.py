@@ -1,9 +1,55 @@
 import os
 
-JWT_SECRET = os.getenv('INTERNFLOW_JWT_SECRET', 'internflow-development-secret-change-me-2026')
+APP_ENV = os.getenv('APP_ENV', 'development').strip().lower()
+IS_PRODUCTION = APP_ENV == 'production'
+
+
+def _first_non_empty(*values: str | None) -> str | None:
+    for value in values:
+        if value is not None and value.strip():
+            return value.strip()
+    return None
+
+
+def _require_setting(setting_name: str, value: str | None, *, allow_dev_fallback: bool = False) -> str:
+    if value:
+        return value
+    if IS_PRODUCTION:
+        raise ValueError(f"{setting_name} is required in production.")
+    if allow_dev_fallback:
+        return allow_dev_fallback
+    return ''
+
+
+JWT_SECRET = _require_setting(
+    'JWT secret',
+    _first_non_empty(
+        os.getenv('INTERNFLOW_JWT_SECRET'),
+        os.getenv('JWT_SECRET'),
+    ),
+    allow_dev_fallback='internflow-development-secret-change-me-2026' if not IS_PRODUCTION else None,
+)
 JWT_ALGORITHM = 'HS256'
-JWT_EXPIRE_MINUTES = int(os.getenv('INTERNFLOW_JWT_EXPIRE_MINUTES', '720'))
-CORS_ORIGINS = os.getenv('INTERNFLOW_CORS_ORIGINS', 'http://localhost:5173').split(',')
+JWT_EXPIRE_MINUTES = int(_first_non_empty(os.getenv('INTERNFLOW_JWT_EXPIRE_MINUTES'), os.getenv('JWT_EXPIRE_MINUTES')) or '720')
+
+
+def _parse_cors_origins(raw_value: str | None) -> list[str]:
+    if raw_value is None:
+        return ['http://localhost:5173'] if not IS_PRODUCTION else []
+    origins = []
+    for part in raw_value.split(','):
+        value = part.strip()
+        if value:
+            origins.append(value)
+    return origins
+
+
+CORS_ORIGINS = _parse_cors_origins(
+    _first_non_empty(
+        os.getenv('INTERNFLOW_CORS_ORIGINS'),
+        os.getenv('CORS_ORIGINS'),
+    )
+)
 
 
 def _parse_allowed_domains(raw_value: str | None, default_domains: tuple[str, ...]) -> tuple[str, ...]:
@@ -16,8 +62,6 @@ def _parse_allowed_domains(raw_value: str | None, default_domains: tuple[str, ..
             continue
         if not domain.startswith('.'):
             domain = f'.{domain}' if not domain.startswith('@') else domain
-        if domain.startswith('@'):
-            domain = domain
         domains.append(domain)
     return tuple(domains) if domains else default_domains
 

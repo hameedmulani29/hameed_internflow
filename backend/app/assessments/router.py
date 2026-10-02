@@ -73,7 +73,7 @@ def create_question(payload: QuestionInput, user=Depends(require_roles('provider
     with get_db() as db:
         cursor = db.execute(
             '''INSERT INTO questions (question_text, type, skill_id, difficulty, options, correct_answer, metadata)
-               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id''',
             (
                 payload.question_text.strip(),
                 payload.type,
@@ -84,7 +84,7 @@ def create_question(payload: QuestionInput, user=Depends(require_roles('provider
                 payload.metadata,
             ),
         )
-        qid = cursor.lastrowid
+        qid = cursor.fetchone()['id']
         db.commit()
         row = db.execute('SELECT q.*, s.name AS skill_name FROM questions q LEFT JOIN skills s ON s.id = q.skill_id WHERE q.id = ?', (qid,)).fetchone()
     res = dict(row)
@@ -101,13 +101,13 @@ def create_assessment(payload: AssessmentInput, user=Depends(require_roles('prov
     with get_db() as db:
         cursor = db.execute(
             '''INSERT INTO assessments (title, description, provider_id, internship_id, pass_score, duration_minutes)
-               VALUES (?, ?, ?, ?, ?, ?)''',
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id''',
             (payload.title.strip(), payload.description, provider_id, payload.internship_id, payload.pass_score, payload.duration_minutes),
         )
-        assessment_id = cursor.lastrowid
+        assessment_id = cursor.fetchone()['id']
 
         for qid in payload.question_ids:
-            db.execute('INSERT OR IGNORE INTO assessment_questions (assessment_id, question_id) VALUES (?, ?)', (assessment_id, qid))
+            db.execute('INSERT INTO assessment_questions (assessment_id, question_id) VALUES (%s, %s) ON CONFLICT DO NOTHING', (assessment_id, qid))
 
         db.commit()
 
@@ -124,7 +124,7 @@ def list_assessments(user=Depends(require_roles('provider'))):
                       (SELECT COUNT(*) FROM assessment_attempts aa WHERE aa.assessment_id = a.id) AS attempt_count,
                       (SELECT COUNT(*) FROM assessment_attempts aa WHERE aa.assessment_id = a.id AND aa.status = 'completed') AS completed_count,
                       (SELECT ROUND(AVG(aa2.overall_score)) FROM assessment_attempts aa2 WHERE aa2.assessment_id = a.id AND aa2.status = 'completed') AS avg_score,
-                      (SELECT COUNT(*) FROM assessment_attempts aa3 WHERE aa3.assessment_id = a.id AND aa3.status = 'completed' AND aa3.passed = 1) AS passed_count
+                      (SELECT COUNT(*) FROM assessment_attempts aa3 WHERE aa3.assessment_id = a.id AND aa3.status = 'completed' AND aa3.passed = TRUE) AS passed_count
                FROM assessments a
                LEFT JOIN internships i ON i.id = a.internship_id
                WHERE a.provider_id = ?
@@ -275,7 +275,7 @@ def get_available_assessment_for_application(application_id: int, user=Depends(r
                         continue
                     cursor = db.execute(
                         '''INSERT INTO questions (question_text, type, skill_id, difficulty, options, correct_answer)
-                           VALUES (?, ?, ?, ?, ?, ?)''',
+                           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id''',
                         (
                             prompt['question_text'],
                             prompt['type'],
@@ -285,14 +285,14 @@ def get_available_assessment_for_application(application_id: int, user=Depends(r
                             prompt['correct_answer'],
                         ),
                     )
-                    question_ids.append(cursor.lastrowid)
+                    question_ids.append(cursor.fetchone()['id'])
 
             if not question_ids:
                 raise HTTPException(status_code=404, detail='No assessment assigned to this internship yet.')
 
             cursor = db.execute(
                 '''INSERT INTO assessments (title, description, provider_id, internship_id, pass_score)
-                   VALUES (?, ?, ?, ?, ?)''',
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id''',
                 (
                     f"{app_row['internship_title']} Assessment",
                     f"Assessment for {app_row['internship_title']}. Auto-created to keep the application flow moving.",
@@ -301,9 +301,9 @@ def get_available_assessment_for_application(application_id: int, user=Depends(r
                     70,
                 ),
             )
-            assessment_id = cursor.lastrowid
+            assessment_id = cursor.fetchone()['id']
             for qid in question_ids:
-                db.execute('INSERT OR IGNORE INTO assessment_questions (assessment_id, question_id) VALUES (?, ?)', (assessment_id, qid))
+                db.execute('INSERT INTO assessment_questions (assessment_id, question_id) VALUES (%s, %s) ON CONFLICT DO NOTHING', (assessment_id, qid))
             db.commit()
             assessment = db.execute('SELECT * FROM assessments WHERE id = ?', (assessment_id,)).fetchone()
 
@@ -369,10 +369,10 @@ def start_assessment_attempt(assessment_id: int, application_id: int, user=Depen
         else:
             cursor = db.execute(
                 '''INSERT INTO assessment_attempts (assessment_id, candidate_id, application_id, status)
-                   VALUES (?, ?, ?, 'in_progress')''',
-            (assessment_id, candidate_id, application_id),
+                   VALUES (%s, %s, %s, 'in_progress') RETURNING id''',
+                (assessment_id, candidate_id, application_id),
             )
-            attempt_id = cursor.lastrowid
+            attempt_id = cursor.fetchone()['id']
             db.commit()
 
         # Fetch questions WITHOUT correct_answer for candidate security!
@@ -480,7 +480,7 @@ def submit_assessment_attempt(attempt_id: int, payload: AssessmentSubmissionInpu
             db.execute(
                 '''INSERT INTO assessment_responses (attempt_id, question_id, response_text, is_correct, score)
                    VALUES (?, ?, ?, ?, ?)''',
-                (attempt_id, qid, user_ans, 1 if is_correct else 0, 1 if is_correct else 0),
+                (attempt_id, qid, user_ans, is_correct, 1 if is_correct else 0),
             )
 
         overall_score = int((correct_count / total_questions * 100)) if total_questions > 0 else 0
@@ -490,7 +490,7 @@ def submit_assessment_attempt(attempt_id: int, payload: AssessmentSubmissionInpu
             '''UPDATE assessment_attempts
                SET status = 'completed', overall_score = ?, passed = ?, completed_at = CURRENT_TIMESTAMP
                WHERE id = ?''',
-            (overall_score, 1 if passed else 0, attempt_id),
+            (overall_score, passed, attempt_id),
         )
 
         # Generate Evidence & candidate skill matches for each evaluated skill

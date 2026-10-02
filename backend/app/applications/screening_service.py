@@ -7,10 +7,9 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-logger = logging.getLogger(__name__)
+from app.services.gemini_service import default_gemini_provider, GeminiQuotaExhaustedError
 
-GEMINI_API_KEY = os.getenv('INTERNFLOW_GEMINI_API_KEY')
-GEMINI_MODEL = os.getenv('INTERNFLOW_GEMINI_MODEL', 'gemini-2.0-flash')
+logger = logging.getLogger(__name__)
 
 
 class ResumeScreeningResult(BaseModel):
@@ -110,30 +109,15 @@ def parse_screening_response(raw_text: str) -> dict[str, Any]:
 
 
 def call_gemini_screening(resume_text: str, internship_title: str, internship_description: str, department: str | None = None) -> dict[str, Any]:
-    api_key = GEMINI_API_KEY or os.getenv('GEMINI_API_KEY')
-    if not api_key:
-        raise RuntimeError('Gemini API key is not configured. Set INTERNFLOW_GEMINI_API_KEY or GEMINI_API_KEY.')
-
     prompt = build_screening_prompt(resume_text, internship_title, internship_description, department)
-    url = f'https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent'
-    payload = {
-        'contents': [{'parts': [{'text': prompt}]}],
-        'generationConfig': {
-            'temperature': 0.2,
-        },
-    }
-
     try:
-        response = httpx.post(url, params={'key': api_key}, json=payload, timeout=30.0)
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
+        result = default_gemini_provider.generate_content(prompt, generation_config={'temperature': 0.2}, timeout=30.0)
+    except GeminiQuotaExhaustedError as exc:
+        logger.warning(f"Resume screening failed due to Gemini quota exhaustion: {exc}")
+        raise RuntimeError('Gemini API key is not configured. Set INTERNFLOW_GEMINI_API_KEY or GEMINI_API_KEY.') from exc
+    except Exception as exc:
         logger.exception('Gemini resume screening request failed.')
         raise RuntimeError('Resume screening service is temporarily unavailable.') from exc
-
-    try:
-        result = response.json()
-    except ValueError as exc:
-        raise RuntimeError('Resume screening service returned an unreadable response.') from exc
 
     candidates = result.get('candidates') or []
     if not candidates:

@@ -190,3 +190,38 @@
   color: var(--provider-text-muted);
   font-size: 0.67rem;
 }
+
+/* ============ Monitoring screen (/mentor/monitoring) ============ */
+/* Two-column monitor (selector + detail) collapses to a single column on
+   tablets/mobiles: selector first, then daily status, per §13. */
+.monitoring-grid {
+  grid-template-columns: minmax(230px, 300px) 1fr;
+}
+
+.monitoring-summary-tile {
+  border: 1px solid #eef2f7;
+  border-radius: 10px;
+  background: #fbfdff;
+  padding: 0.5rem 0.7rem;
+}
+
+.monitoring-summary-tile.tone-bad {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(254, 242, 242, 0.7);
+}
+
+.monitoring-summary-tile.tone-warn {
+  border-color: rgba(217, 119, 6, 0.3);
+  background: rgba(255, 251, 235, 0.7);
+}
+
+.monitoring-summary-tile.tone-ok {
+  border-color: rgba(22, 163, 74, 0.25);
+  background: rgba(240, 253, 244, 0.6);
+}
+
+@media (max-width: 960px) {
+  .monitoring-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -14,13 +14,13 @@ def setup_db():
 def test_full_internflow_end_to_end_lifecycle_and_failure_scenarios():
     # 1. Setup Provider & Candidate Accounts
     with get_db() as db:
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role, organization) VALUES ('Tech Corp Inc', 'e2e-prov@test.com', 'hash', 'provider', 'TechCorp')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role, organization) VALUES ('Tech Corp Inc', 'e2e-prov@test.com', 'hash', 'provider', 'TechCorp') ON CONFLICT (email) DO NOTHING")
         p_id = db.execute("SELECT id FROM users WHERE email='e2e-prov@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Mentor Dave', 'e2e-mentor@test.com', 'hash', 'mentor')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mentor Dave', 'e2e-mentor@test.com', 'hash', 'mentor') ON CONFLICT (email) DO NOTHING")
         m_id = db.execute("SELECT id FROM users WHERE email='e2e-mentor@test.com'").fetchone()[0]
 
-        db.execute("INSERT OR IGNORE INTO users (full_name, email, password_hash, role) VALUES ('Candidate Alice', 'e2e-cand@test.com', 'hash', 'intern')")
+        db.execute("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Candidate Alice', 'e2e-cand@test.com', 'hash', 'intern') ON CONFLICT (email) DO NOTHING")
         c_id = db.execute("SELECT id FROM users WHERE email='e2e-cand@test.com'").fetchone()[0]
         db.commit()
 

@@ -3,7 +3,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.core.config import validate_email_for_role
 from app.core.security import create_token, hash_password, verify_password
-from app.db import get_db, seed_mentor_demo_data
+from app.db import get_db, is_unique_violation, seed_mentor_demo_data
 
 router = APIRouter(prefix='/api/auth', tags=['auth'])
 
@@ -36,17 +36,18 @@ def register(payload: RegisterRequest):
             is_approved = 1
             is_verified = 1
             cursor = db.execute(
-                'INSERT INTO users (full_name, email, password_hash, role, organization, is_active, is_verified, is_approved, trust_level, requires_2fa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'INSERT INTO users (full_name, email, password_hash, role, organization, is_active, is_verified, is_approved, trust_level, requires_2fa) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id',
                 (payload.full_name.strip(), email_lower, hash_password(payload.password), payload.role, payload.organization, 1, is_verified, is_approved, 'approved', 0),
             )
+            ret = cursor.fetchone()
+            user_id = ret["id"] if isinstance(ret, dict) or hasattr(ret, "__getitem__") and "id" in ret else ret[0]
             db.commit()
         except Exception as error:
-            if 'UNIQUE constraint' in str(error):
+            if is_unique_violation(error):
                 raise HTTPException(status_code=409, detail='An account with this email already exists.') from error
             raise
         if payload.role == 'mentor':
-            seed_mentor_demo_data(db, cursor.lastrowid)
-        user_id = cursor.lastrowid
+            seed_mentor_demo_data(db, user_id)
     return {'user': {'id': user_id, 'full_name': payload.full_name, 'email': payload.email, 'role': payload.role, 'organization': payload.organization}, 'token': create_token(user_id, payload.role)}
 
 
@@ -54,7 +55,7 @@ def register(payload: RegisterRequest):
 def login(payload: LoginRequest):
     email_lower = payload.email.lower()
     with get_db() as db:
-        user = db.execute('SELECT * FROM users WHERE email = ?', (email_lower,)).fetchone()
+        user = db.execute('SELECT * FROM users WHERE email = %s', (email_lower,)).fetchone()
     if not user or not verify_password(payload.password, user['password_hash']):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid email or password.')
     if user['role'] in {'provider', 'mentor'}:

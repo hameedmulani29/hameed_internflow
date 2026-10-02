@@ -54,7 +54,7 @@ def transition_application_status(db, application_id: int, provider_id: int, new
 
 
 def send_interview_required_webhook(payload: dict):
-    webhook_url = os.getenv('INTFLOW_MAKE_INTERVIEW_WEBHOOK_URL')
+    webhook_url = os.getenv('INTERNFLOW_MAKE_INTERVIEW_WEBHOOK_URL') or os.getenv('INTFLOW_MAKE_INTERVIEW_WEBHOOK_URL')
     if not webhook_url:
         logger.warning(
             'Make INTERVIEW_REQUIRED webhook URL is not configured for application_id=%s',

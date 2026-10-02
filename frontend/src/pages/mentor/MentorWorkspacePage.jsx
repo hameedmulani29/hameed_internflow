@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Activity,
   ArrowLeft,
   ArrowRight,
   Bell,
@@ -27,6 +28,7 @@ import {
 import logoUrl from '../../assets/logo.png';
 import MentorBackground from '../../components/mentor/MentorBackground';
 import MentorProjectsPage from './MentorProjectsPage';
+import MentorMonitoringView from './MentorMonitoringView';
 import Pagination from '../../components/common/Pagination';
 import ConfirmationModal from '../../components/common/ConfirmationModal';
 import SkillChip from '../../components/common/SkillChip';
@@ -68,6 +70,7 @@ function formatActivityTime(isoString) {
 
 const MENTOR_NAV = [
   ['Dashboard', '/mentor/dashboard', LayoutDashboard],
+  ['Monitoring', '/mentor/monitoring', Activity],
   ['My Interns', '/mentor/interns', Users],
   ['Projects', '/mentor/projects', FolderKanban],
   ['Tasks', '/mentor/tasks', ClipboardList],
@@ -81,6 +84,7 @@ const MENTOR_NAV = [
 
 const titles = {
   '/mentor/dashboard': ['Mentor Workspace', 'Here is what needs your guidance today.'],
+  '/mentor/monitoring': ['Intern Monitoring', 'Daily status across every intern assigned to you.'],
   '/mentor/interns': ['My Interns', 'Track and guide your assigned learners.'],
   '/mentor/projects': ['Projects', 'Plan each internship as a project with master tasks and chunks.'],
   '/mentor/tasks': ['Task Management', 'Assign focused technical tasks and track delivery.'],
@@ -529,8 +533,57 @@ function InternsPage({ items = [], onNavigate }) {
       </div>
 
       <section className="mentor-panel">
+        {internsList.length === 0 && !search && !statusFilter && (
+          <div
+            className="floating-info-popup animate-fade-in"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '14px',
+              background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))',
+              border: '1px solid rgba(56, 189, 248, 0.4)',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(56, 189, 248, 0.15)',
+              borderRadius: '16px',
+              padding: '16px 20px',
+              marginBottom: '20px',
+              backdropFilter: 'blur(12px)',
+            }}
+          >
+            <div
+              style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '12px',
+                background: 'rgba(56, 189, 248, 0.15)',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#38bdf8',
+                flexShrink: 0,
+              }}
+            >
+              <Users size={22} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h4 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 600, color: '#f8fafc' }}>
+                No Interns Assigned Yet
+              </h4>
+              <p style={{ margin: '3px 0 0', fontSize: '0.84rem', color: '#94a3b8' }}>
+                You have not been assigned any interns till now. Intern assignments are managed by your program provider.
+              </p>
+            </div>
+          </div>
+        )}
         {paginated.length === 0 ? (
-          <EmptyState title="No Interns Found" message="No assigned interns match your search parameters." />
+          <EmptyState
+            title="No Interns Assigned"
+            message={
+              internsList.length === 0
+                ? "You have not been assigned any interns till now."
+                : "No assigned interns match your search parameters."
+            }
+          />
         ) : (
           <>
             <div className="mentor-intern-list">
@@ -1862,6 +1915,9 @@ export default function MentorWorkspacePage(props) {
             {isInternDetail && <InternDetailPage internId={detailInternId} onNavigate={onNavigate} />}
             {!isInternDetail && path === '/mentor/dashboard' && (
               <Dashboard data={data || {}} internFeedback={internFeedback} onNavigate={onNavigate} activityFeed={liveActivities} mentorTasks={mentorTasks} />
+            )}
+            {!isInternDetail && path === '/mentor/monitoring' && (
+              <MentorMonitoringView interns={interns} onNavigate={onNavigate} refreshKey={refresh} />
             )}
             {!isInternDetail && path === '/mentor/interns' && <InternsPage items={data?.items || interns} onNavigate={onNavigate} />}
             {!isInternDetail && path === '/mentor/projects' && <MentorProjectsPage />}

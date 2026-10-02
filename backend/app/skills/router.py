@@ -30,11 +30,11 @@ def get_or_create_skill(db, raw_name: str) -> tuple[int, str]:
     normalized = normalize_skill_name(raw_name)
     if not normalized:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail='Skill name is required.')
-    row = db.execute('SELECT id, name FROM skills WHERE name = ?', (normalized,)).fetchone()
+    row = db.execute('SELECT id, name FROM skills WHERE name = %s', (normalized,)).fetchone()
     if row:
         return row['id'], row['name']
-    cursor = db.execute('INSERT INTO skills (name) VALUES (?)', (normalized,))
-    return cursor.lastrowid, normalized
+    cursor = db.execute('INSERT INTO skills (name) VALUES (%s) RETURNING id', (normalized,))
+    return cursor.fetchone()['id'], normalized
 
 
 def resolve_skill_ids(db, names):
