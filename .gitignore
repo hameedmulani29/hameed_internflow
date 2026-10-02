@@ -30,6 +30,7 @@ coverage/
 *.db
 *.sqlite
 *.sqlite3
+*.md
 backend/storage/certificates/*.pdf
 
 # Editor directories and files
