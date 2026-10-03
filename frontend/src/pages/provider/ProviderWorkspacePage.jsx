@@ -2988,16 +2988,20 @@ function Automation({ onNavigate }) {
 // mentor only appears if the provider's own internship links them.
 
 function Mentors({ onNavigate }) {
-  const [assignments, setAssignments] = useState([]);
+  const [mentorsList, setMentorsList] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
 
+  const [selectedMentor, setSelectedMentor] = useState(null);
+  const [internsList, setInternsList] = useState([]);
+  const [assignForm, setAssignForm] = useState({ internId: '', internshipId: '', submitting: false, error: '', done: false });
+
   const loadMentors = () => {
     setIsLoading(true);
     setError('');
-    fetchProviderAssignments()
-      .then((result) => setAssignments(result.items || []))
+    fetchAvailableMentors()
+      .then((result) => setMentorsList(result.items || []))
       .catch((requestError) => setError(requestError?.message || 'Could not load mentors.'))
       .finally(() => setIsLoading(false));
   };
@@ -3006,27 +3010,53 @@ function Mentors({ onNavigate }) {
     Promise.resolve().then(loadMentors);
   }, []);
 
-  // Group assignments by mentor.
-  const mentorMap = new Map();
-  for (const a of assignments) {
-    if (!mentorMap.has(a.mentor_id)) {
-      mentorMap.set(a.mentor_id, { mentor_id: a.mentor_id, mentor_name: a.mentor_name, mentees: [] });
-    }
-    mentorMap.get(a.mentor_id).mentees.push(a);
-  }
-  const mentors = [...mentorMap.values()];
+  const handleOpenAssignModal = (mentor) => {
+    setSelectedMentor(mentor);
+    setAssignForm({ internId: '', internshipId: '', submitting: false, error: '', done: false });
+    fetchProviderAssignments()
+      .then((res) => {
+        const items = res.items || [];
+        setInternsList(items);
+      })
+      .catch(() => {});
+  };
 
-  const filtered = mentors.filter((m) =>
+  const handleExecuteAssign = () => {
+    if (!assignForm.internId || !selectedMentor) {
+      setAssignForm((prev) => ({ ...prev, error: 'Please select an intern to assign.' }));
+      return;
+    }
+    setAssignForm((prev) => ({ ...prev, submitting: true, error: '' }));
+    createMentorAssignment({
+      mentorId: selectedMentor.id,
+      internId: assignForm.internId,
+      internshipId: assignForm.internshipId || null,
+    })
+      .then(() => {
+        setAssignForm((prev) => ({ ...prev, submitting: false, done: true }));
+        loadMentors();
+      })
+      .catch((err) => {
+        setAssignForm((prev) => ({ ...prev, submitting: false, error: err?.message || 'Failed to assign mentor.' }));
+      });
+  };
+
+  const filtered = mentorsList.filter((m) =>
     !query
-    || (m.mentor_name || '').toLowerCase().includes(query.toLowerCase())
-    || m.mentees.some((a) => (a.internship_title || '').toLowerCase().includes(query.toLowerCase())));
+    || (m.full_name || '').toLowerCase().includes(query.toLowerCase())
+    || (m.email || '').toLowerCase().includes(query.toLowerCase())
+    || (m.organization || '').toLowerCase().includes(query.toLowerCase())
+    || (m.assigned_interns || []).some((i) => (i.intern_name || '').toLowerCase().includes(query.toLowerCase()) || (i.internship_title || '').toLowerCase().includes(query.toLowerCase()))
+  );
+
+  const totalAssignedInterns = mentorsList.reduce((acc, m) => acc + (m.assigned_interns_count || 0), 0);
 
   return (
     <>
       <SectionHeader
         eyebrow="Delivery team"
-        title="Mentors"
-        description="Mentors delivering your internships, with their assigned interns. Mentor identity is limited to name and assignment data."
+        title="Mentor Directory"
+        description="Mentors available within your organization and internship scope. View profiles and manage mentor-to-intern assignments."
         actions={
           <button className="provider-quiet-button" type="button" onClick={loadMentors} disabled={isLoading}>
             <RefreshCw size={14} /> Refresh
@@ -3036,56 +3066,190 @@ function Mentors({ onNavigate }) {
 
       <StatStrip
         items={[
-          ['Mentors engaged', String(mentors.length), 'On your programs'],
-          ['Intern assignments', String(assignments.length), 'Mentor ↔ intern links'],
-          ['Active assignments', String(assignments.filter((a) => (a.status || '') === 'active').length), 'Currently running'],
+          ['Mentors in Scope', String(mentorsList.length), 'Registered mentors'],
+          ['Active Mentors', String(mentorsList.filter((m) => (m.assigned_interns_count || 0) > 0).length), 'Currently assigned to interns'],
+          ['Mentees Supervised', String(totalAssignedInterns), 'Active mentor ↔ intern links'],
         ]}
       />
 
       {error ? (
         <ErrorPanel message={error} onRetry={loadMentors} />
       ) : isLoading ? (
-        <LoadingPanel label="Loading mentors…" />
-      ) : mentors.length === 0 ? (
+        <LoadingPanel label="Loading mentor directory…" />
+      ) : mentorsList.length === 0 ? (
         <EmptyPanel
-          title="No mentors assigned yet"
-          message="Assign a mentor to an intern from an internship's Applications view — mentors will appear here grouped with their interns."
+          title="No mentors found"
+          message="No mentors are currently registered under your organization. Mentors will appear here once they sign up with your organization name or are assigned to your internships."
         />
       ) : (
         <>
           <div className="provider-workspace-toolbar">
             <div className="provider-search-field">
               <Search size={16} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search mentors or programs..." />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search mentors by name, email, organization, or intern..." />
             </div>
           </div>
 
-          <div className="provider-automation-cards">
+          <div className="provider-automation-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
             {filtered.map((mentor) => (
-              <article className="provider-automation-card" key={mentor.mentor_id}>
-                <div className="provider-automation-card-top">
-                  <span className="provider-automation-icon"><Users size={17} /></span>
-                  <StatusPill tone="info">{mentor.mentees.filter((a) => (a.status || '') === 'active').length} active</StatusPill>
-                </div>
-                <h2>{mentor.mentor_name || 'Mentor'}</h2>
-                <p>{mentor.mentees.length} assigned intern{mentor.mentees.length === 1 ? '' : 's'}</p>
+              <article className="provider-automation-card" key={mentor.id} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', background: '#fff', borderRadius: '12px', border: '1px solid var(--provider-border, #e2e8f0)', padding: '20px' }}>
                 <div>
-                  <small>Internships</small>
-                  <strong>{[...new Set(mentor.mentees.map((a) => a.internship_title).filter(Boolean))].join(', ') || '—'}</strong>
+                  <div className="provider-automation-card-top" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <span className="provider-automation-icon"><Users size={18} /></span>
+                    <StatusPill tone={mentor.assigned_interns_count > 0 ? 'info' : 'success'}>
+                      {mentor.status || (mentor.assigned_interns_count > 0 ? `${mentor.assigned_interns_count} active` : 'Available')}
+                    </StatusPill>
+                  </div>
+                  <h2 style={{ margin: '0 0 4px', fontSize: '1.15rem', fontWeight: 700, color: 'var(--provider-text, #0f172a)' }}>{mentor.full_name}</h2>
+                  <p style={{ margin: '0 0 8px', fontSize: '0.85rem', color: 'var(--provider-muted, #64748b)' }}>{mentor.email}</p>
+                  
+                  {mentor.organization && (
+                    <p style={{ margin: '0 0 12px', fontSize: '0.8rem', color: 'var(--provider-muted, #64748b)' }}>
+                      <strong>Org:</strong> {mentor.organization}
+                    </p>
+                  )}
+
+                  <div style={{ background: 'var(--provider-surface, #f8fafc)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--provider-border, #e2e8f0)', marginBottom: '16px' }}>
+                    <small style={{ textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, fontSize: '0.7rem', color: 'var(--provider-muted, #64748b)', display: 'block', marginBottom: '4px' }}>
+                      Assigned Interns ({mentor.assigned_interns_count || 0})
+                    </small>
+                    {mentor.assigned_interns && mentor.assigned_interns.length > 0 ? (
+                      <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '0.84rem', color: 'var(--provider-text, #0f172a)' }}>
+                        {mentor.assigned_interns.map((asg) => (
+                          <li key={asg.assignment_id || asg.intern_id}>
+                            <strong>{asg.intern_name}</strong> {asg.internship_title ? `— ${asg.internship_title}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span style={{ fontSize: '0.82rem', color: 'var(--provider-muted, #94a3b8)', fontStyle: 'italic' }}>No interns currently assigned</span>
+                    )}
+                  </div>
                 </div>
-                <button
-                  className="provider-quiet-button"
-                  type="button"
-                  onClick={() => {
-                    try { sessionStorage.setItem('internflow_selected_mentor', String(mentor.mentor_id)); } catch { /* private mode */ }
-                    onNavigate('/provider-mentor-details');
-                  }}
-                >
-                  View mentor details
-                </button>
+
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <button
+                    className="provider-quiet-button"
+                    type="button"
+                    style={{ flex: 1, justifyContent: 'center' }}
+                    onClick={() => {
+                      try { sessionStorage.setItem('internflow_selected_mentor', String(mentor.id)); } catch { /* private mode */ }
+                      onNavigate('/provider-mentor-details');
+                    }}
+                  >
+                    View Profile
+                  </button>
+                  <button
+                    className="provider-primary-btn"
+                    type="button"
+                    style={{ flex: 1, justifyContent: 'center', fontSize: '0.82rem', padding: '6px 10px' }}
+                    onClick={() => handleOpenAssignModal(mentor)}
+                  >
+                    <UserPlus size={14} /> Assign Intern
+                  </button>
+                </div>
               </article>
             ))}
           </div>
+
+          {selectedMentor && (
+            <div
+              className="provider-modal-backdrop"
+              onClick={() => setSelectedMentor(null)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                backdropFilter: 'blur(4px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1000,
+                padding: '20px',
+              }}
+            >
+              <div
+                className="provider-modal-card"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: '#ffffff',
+                  borderRadius: '16px',
+                  maxWidth: '520px',
+                  width: '100%',
+                  padding: '24px',
+                  boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+                  border: '1px solid var(--provider-border, #e2e8f0)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Assign Intern to {selectedMentor.full_name}</h3>
+                  <button type="button" onClick={() => setSelectedMentor(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}>
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {assignForm.done ? (
+                  <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', color: '#059669', fontWeight: 700, marginBottom: '8px' }}>
+                      <CheckCircle2 size={22} /> Mentor Assigned Successfully!
+                    </div>
+                    <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '16px' }}>
+                      {selectedMentor.full_name} is now actively assigned to the selected intern.
+                    </p>
+                    <button className="provider-primary-btn" type="button" onClick={() => setSelectedMentor(null)}>
+                      Done
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ marginBottom: '14px' }}>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '6px' }}>Select Intern *</label>
+                      <select
+                        value={assignForm.internId}
+                        onChange={(e) => {
+                          const chosen = internsList.find((i) => String(i.intern_id) === e.target.value);
+                          setAssignForm((prev) => ({
+                            ...prev,
+                            internId: e.target.value,
+                            internshipId: chosen ? chosen.internship_id : prev.internshipId,
+                            error: '',
+                          }));
+                        }}
+                        style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.88rem' }}
+                      >
+                        <option value="">Select an intern…</option>
+                        {internsList.map((item) => (
+                          <option key={item.id || item.intern_id} value={item.intern_id}>
+                            {item.intern_name} {item.internship_title ? `(${item.internship_title})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {assignForm.error && (
+                      <div className="provider-ai-callout" role="alert" style={{ marginBottom: '12px' }}>
+                        {assignForm.error}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+                      <button className="provider-quiet-button" type="button" onClick={() => setSelectedMentor(null)}>
+                        Cancel
+                      </button>
+                      <button
+                        className="provider-primary-btn"
+                        type="button"
+                        disabled={assignForm.submitting || !assignForm.internId}
+                        onClick={handleExecuteAssign}
+                      >
+                        <UserPlus size={15} /> {assignForm.submitting ? 'Assigning…' : 'Confirm Assignment'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
     </>

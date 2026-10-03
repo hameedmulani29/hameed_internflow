@@ -12,6 +12,7 @@ from app.services.scheduling_service import preview_schedule, execute_schedule
 from app.websocket.manager import mentor_manager
 from app.services.activity_service import record_and_broadcast_activity, fetch_mentor_activity
 from app.services.progress_service import calculate_project_progress, calculate_intern_progress
+from app.services.intern_detail_service import get_intern_progress_detail
 
 router = APIRouter(prefix='/api/mentor', tags=['mentor'])
 
@@ -87,26 +88,88 @@ def ensure_assignment(db, mentor, intern):
 def create_assignment(payload: AssignmentInput, token=Depends(require_roles('provider'))):
     provider = int(token['sub'])
     with get_db() as db:
-        mentor = db.execute("SELECT id FROM users WHERE id = ? AND role = 'mentor'", (payload.mentor_id,)).fetchone()
-        intern = db.execute("SELECT id FROM users WHERE id = ? AND role = 'intern'", (payload.intern_id,)).fetchone()
+        mentor = db.execute("SELECT id, full_name, email, organization FROM users WHERE id = ? AND role = 'mentor'", (payload.mentor_id,)).fetchone()
+        intern = db.execute("SELECT id, full_name, email, organization FROM users WHERE id = ? AND role = 'intern'", (payload.intern_id,)).fetchone()
         if not mentor or not intern:
             raise HTTPException(status_code=404, detail='Mentor or intern not found.')
-        if payload.internship_id:
-            internship = db.execute('SELECT id FROM internships WHERE id = ? AND provider_id = ?', (payload.internship_id, provider)).fetchone()
+
+        provider_user = db.execute("SELECT id, organization FROM users WHERE id = ?", (provider,)).fetchone()
+        prov_org = (provider_user['organization'] or '').strip() if provider_user else ''
+
+        mentor_org = (mentor['organization'] or '').strip()
+        if mentor_org and prov_org and mentor_org.lower() != prov_org.lower():
+            has_link = db.execute(
+                '''SELECT 1 FROM mentor_assignments ma
+                   JOIN internships i ON i.id = ma.internship_id
+                   WHERE ma.mentor_id = ? AND i.provider_id = ?''',
+                (payload.mentor_id, provider),
+            ).fetchone()
+            if not has_link:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Mentor does not belong to your organization scope.')
+
+        internship_id = payload.internship_id
+        if internship_id:
+            internship = db.execute('SELECT id FROM internships WHERE id = ? AND provider_id = ?', (internship_id, provider)).fetchone()
             if not internship:
                 raise HTTPException(status_code=404, detail='Internship not found for this provider.')
-        try:
-            cursor = db.execute(
-                'INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id) VALUES (%s, %s, %s) RETURNING id',
-                (payload.mentor_id, payload.intern_id, payload.internship_id),
+        else:
+            app_ship = db.execute(
+                '''SELECT a.internship_id FROM applications a
+                   JOIN internships i ON i.id = a.internship_id
+                   WHERE a.applicant_id = ? AND i.provider_id = ?
+                   ORDER BY a.created_at DESC LIMIT 1''',
+                (payload.intern_id, provider),
+            ).fetchone()
+            if app_ship:
+                internship_id = app_ship['internship_id']
+            else:
+                any_ship = db.execute('SELECT id FROM internships WHERE provider_id = ? ORDER BY id DESC LIMIT 1', (provider,)).fetchone()
+                if any_ship:
+                    internship_id = any_ship['id']
+
+        if internship_id:
+            db.execute(
+                '''UPDATE mentor_assignments
+                   SET status = 'completed'
+                   WHERE intern_id = ? AND internship_id = ? AND mentor_id != ? AND status = 'active' ''',
+                (payload.intern_id, internship_id, payload.mentor_id),
             )
-            assign_id = cursor.fetchone()['id']
-            db.commit()
-        except Exception as error:
-            if is_unique_violation(error) or 'UNIQUE constraint' in str(error):
-                raise HTTPException(status_code=409, detail='This intern is already assigned to that mentor.') from error
-            raise
-        row = db.execute('SELECT * FROM mentor_assignments WHERE id = %s', (assign_id,)).fetchone()
+
+        existing = db.execute(
+            'SELECT id FROM mentor_assignments WHERE mentor_id = ? AND intern_id = ?',
+            (payload.mentor_id, payload.intern_id),
+        ).fetchone()
+
+        if existing:
+            db.execute(
+                '''UPDATE mentor_assignments
+                   SET status = 'active', internship_id = COALESCE(?, internship_id), created_at = CURRENT_TIMESTAMP
+                   WHERE id = ?''',
+                (internship_id, existing['id']),
+            )
+            assign_id = existing['id']
+        else:
+            cursor = db.execute(
+                'INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (%s, %s, %s, %s) RETURNING id',
+                (payload.mentor_id, payload.intern_id, internship_id, 'active'),
+            )
+            ret = cursor.fetchone()
+            assign_id = ret['id'] if isinstance(ret, dict) or (hasattr(ret, '__getitem__') and 'id' in ret) else ret[0]
+
+        db.commit()
+
+        row = db.execute(
+            '''SELECT ma.*, u.full_name AS mentor_name, u.email AS mentor_email,
+                      iu.full_name AS intern_name, iu.email AS intern_email,
+                      i.title AS internship_title
+               FROM mentor_assignments ma
+               JOIN users u ON u.id = ma.mentor_id
+               JOIN users iu ON iu.id = ma.intern_id
+               LEFT JOIN internships i ON i.id = ma.internship_id
+               WHERE ma.id = ?''',
+            (assign_id,),
+        ).fetchone()
+
     return serialize(row)
 
 
@@ -116,13 +179,14 @@ def list_assignments(token=Depends(require_roles('provider'))):
     provider = int(token['sub'])
     with get_db() as db:
         rows = db.execute(
-            '''SELECT ma.*, u.full_name AS mentor_name, iu.full_name AS intern_name,
+            '''SELECT ma.*, u.full_name AS mentor_name, u.email AS mentor_email,
+                      iu.full_name AS intern_name, iu.email AS intern_email,
                       i.title AS internship_title
                FROM mentor_assignments ma
                JOIN users u ON u.id = ma.mentor_id
                JOIN users iu ON iu.id = ma.intern_id
-               JOIN internships i ON i.id = ma.internship_id
-               WHERE i.provider_id = ?
+               LEFT JOIN internships i ON i.id = ma.internship_id
+               WHERE (i.provider_id = ? OR ma.internship_id IS NULL)
                ORDER BY ma.created_at DESC''',
             (provider,),
         ).fetchall()
@@ -212,12 +276,57 @@ def provider_mentee_detail(intern_id: int, token=Depends(require_roles('provider
 
 @router.get('/assignments/mentors')
 def available_mentors(token=Depends(require_roles('provider'))):
-    """Mentors available for assignment (role = mentor)."""
+    """Mentors available for assignment within provider's valid scope."""
+    provider_id = int(token['sub'])
     with get_db() as db:
+        provider_user = db.execute("SELECT id, organization FROM users WHERE id = ?", (provider_id,)).fetchone()
+        org_name = (provider_user['organization'] or '').strip() if provider_user else ''
+
         rows = db.execute(
-            "SELECT id, full_name, email, organization FROM users WHERE role = 'mentor' ORDER BY full_name",
+            '''SELECT u.id, u.full_name, u.email, u.organization, u.created_at
+               FROM users u
+               WHERE u.role = 'mentor'
+                 AND (
+                   (LOWER(TRIM(u.organization)) = LOWER(TRIM(?)) AND ? != '')
+                   OR EXISTS (
+                     SELECT 1 FROM mentor_assignments ma
+                     JOIN internships i ON i.id = ma.internship_id
+                     WHERE ma.mentor_id = u.id AND i.provider_id = ?
+                   )
+                   OR (
+                     (u.organization IS NULL OR TRIM(u.organization) = '')
+                     AND NOT EXISTS (
+                       SELECT 1 FROM mentor_assignments ma
+                       JOIN internships i ON i.id = ma.internship_id
+                       WHERE ma.mentor_id = u.id AND i.provider_id != ?
+                     )
+                   )
+                 )
+               ORDER BY u.full_name''',
+            (org_name, org_name, provider_id, provider_id),
         ).fetchall()
-    return {'items': [serialize(row) for row in rows]}
+
+        items = []
+        for r in rows:
+            m_dict = dict(r)
+            mentees = db.execute(
+                '''SELECT ma.id AS assignment_id, ma.intern_id, iu.full_name AS intern_name, iu.email AS intern_email,
+                          ma.status, ma.internship_id, i.title AS internship_title
+                   FROM mentor_assignments ma
+                   JOIN users iu ON iu.id = ma.intern_id
+                   LEFT JOIN internships i ON i.id = ma.internship_id
+                   WHERE ma.mentor_id = ? AND ma.status = 'active'
+                     AND (i.provider_id = ? OR i.provider_id IS NULL)''',
+                (m_dict['id'], provider_id),
+            ).fetchall()
+            mentee_list = [dict(m) for m in mentees]
+            active_count = len(mentee_list)
+            m_dict['assigned_interns_count'] = active_count
+            m_dict['assigned_interns'] = mentee_list
+            m_dict['status'] = 'Available' if active_count == 0 else f'Assigned ({active_count} intern{"s" if active_count > 1 else ""})'
+            items.append(m_dict)
+
+    return {'items': items}
 
 
 def serialize(row):
@@ -475,81 +584,7 @@ def intern_detail(intern_id: int, token=Depends(require_roles('mentor'))):
     feedback history, and skill observations."""
     mentor = mentor_id(token)
     with get_db() as db:
-        ensure_assignment(db, mentor, intern_id)
-        intern = db.execute(
-            'SELECT id, full_name, email FROM users WHERE id = ?',
-            (intern_id,),
-        ).fetchone()
-        if not intern:
-            raise HTTPException(status_code=404, detail='Intern not found.')
-
-        assignment = db.execute(
-            '''SELECT ma.id, ma.status, ma.created_at AS assigned_at, i.title AS internship_title,
-                      i.department, i.work_mode, i.duration
-               FROM mentor_assignments ma
-               LEFT JOIN internships i ON i.id = ma.internship_id
-               WHERE ma.mentor_id = ? AND ma.intern_id = ? AND ma.status = 'active'
-               ORDER BY ma.created_at DESC LIMIT 1''',
-            (mentor, intern_id),
-        ).fetchone()
-
-        tasks = db.execute(
-            '''SELECT mt.*, ts.id AS submission_id, ts.status AS submission_status,
-                      ts.submitted_at
-               FROM mentor_tasks mt
-               LEFT JOIN task_submissions ts ON ts.task_id = mt.id
-               WHERE mt.mentor_id = ? AND mt.intern_id = ?
-               ORDER BY mt.due_date IS NULL, mt.due_date, mt.created_at DESC''',
-            (mentor, intern_id),
-        ).fetchall()
-
-        submissions = db.execute(
-            '''SELECT ts.id, ts.task_id, ts.content, ts.status, ts.submitted_at, mt.title AS task_title
-               FROM task_submissions ts
-               JOIN mentor_tasks mt ON mt.id = ts.task_id
-               WHERE mt.mentor_id = ? AND ts.intern_id = ?
-               ORDER BY ts.submitted_at DESC''',
-            (mentor, intern_id),
-        ).fetchall()
-
-        feedback = db.execute(
-            '''SELECT mf.id, mf.feedback, mf.strengths, mf.improvements, mf.next_steps,
-                      mf.created_at, mt.title AS task_title
-               FROM mentor_feedback mf
-               LEFT JOIN mentor_tasks mt ON mt.id = mf.task_id
-               WHERE mf.mentor_id = ? AND mf.intern_id = ?
-               ORDER BY mf.created_at DESC''',
-            (mentor, intern_id),
-        ).fetchall()
-
-        skills = db.execute(
-            '''SELECT s.id, s.name, cs.source
-               FROM candidate_skills cs
-               JOIN skills s ON s.id = cs.skill_id
-               WHERE cs.intern_id = ? ORDER BY s.name''',
-            (intern_id,),
-        ).fetchall()
-
-        observations = db.execute(
-            '''SELECT o.id, o.level, o.note, o.created_at, s.name AS skill_name,
-                      mt.title AS task_title
-               FROM mentor_skill_observations o
-               JOIN skills s ON s.id = o.skill_id
-               LEFT JOIN mentor_tasks mt ON mt.id = o.task_id
-               WHERE o.mentor_id = ? AND o.intern_id = ?
-               ORDER BY o.created_at DESC''',
-            (mentor, intern_id),
-        ).fetchall()
-
-    return {
-        'intern': serialize(intern),
-        'assignment': serialize(assignment) if assignment else None,
-        'tasks': [serialize(t) for t in tasks],
-        'submissions': [serialize(s) for s in submissions],
-        'feedback': [serialize(f) for f in feedback],
-        'skills': [serialize(s) for s in skills],
-        'observations': [serialize(o) for o in observations],
-    }
+        return get_intern_progress_detail(db, intern_id=intern_id, mentor_id=mentor)
 
 
 @router.get('/interns/{intern_id}/observations')

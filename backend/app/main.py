@@ -20,6 +20,7 @@ from app.mentors.router import router as mentor_router, mentor_websocket
 from app.notifications.router import router as notifications_router
 from app.outcomes.router import router as outcomes_router
 from app.progress.router import router as progress_router
+from app.provider_automation.router import router as provider_automation_router
 from app.skills.router import router as skills_router
 
 app = FastAPI(title='InternFlow API', version='1.0.0')
@@ -44,6 +45,7 @@ app.include_router(goals_router)
 app.include_router(evidence_router)
 app.include_router(outcomes_router)
 app.include_router(progress_router)
+app.include_router(provider_automation_router)
 
 # Mount alias for /api/ws/mentor
 app.websocket('/api/ws/mentor')(mentor_websocket)

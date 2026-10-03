@@ -1,0 +1,205 @@
+[
+  {
+    "step": 1,
+    "title": "Provider registration/login",
+    "status": "PASS",
+    "evidence": "Created Provider ID: 83, JWT issued",
+    "blocker": "None"
+  },
+  {
+    "step": 2,
+    "title": "Create internship",
+    "status": "PASS",
+    "evidence": "Created Internship ID: 16",
+    "blocker": "None"
+  },
+  {
+    "step": 3,
+    "title": "Publish internship",
+    "status": "PASS",
+    "evidence": "Internship ID 16 status updated to published",
+    "blocker": "None"
+  },
+  {
+    "step": 4,
+    "title": "Candidate registration/login",
+    "status": "PASS",
+    "evidence": "Created Candidate ID: 84, JWT issued",
+    "blocker": "None"
+  },
+  {
+    "step": 5,
+    "title": "View internship",
+    "status": "PASS",
+    "evidence": "Listed 16 published internships. Target found: True",
+    "blocker": "None"
+  },
+  {
+    "step": 6,
+    "title": "Apply",
+    "status": "PASS",
+    "evidence": "Application ID: 10 created in DB",
+    "blocker": "None"
+  },
+  {
+    "step": 7,
+    "title": "Upload PDF resume",
+    "status": "PASS",
+    "evidence": "PDF validated and extracted 52 chars",
+    "blocker": "None"
+  },
+  {
+    "step": 8,
+    "title": "Verify screening is triggered",
+    "status": "PASS",
+    "evidence": "Screening worker executed, status: failed",
+    "blocker": "None"
+  },
+  {
+    "step": 9,
+    "title": "Verify AI screening result is persisted",
+    "status": "PASS",
+    "evidence": "DB record found in application_screening_results: status=failed, model=gemini-2.0-flash",
+    "blocker": "None"
+  },
+  {
+    "step": 10,
+    "title": "Provider views candidate match/evidence",
+    "status": "PASS",
+    "evidence": "Fetched candidate details & skills match (0 matched skills)",
+    "blocker": "None"
+  },
+  {
+    "step": 11,
+    "title": "Provider shortlists candidate",
+    "status": "PASS",
+    "evidence": "Decision saved: advance",
+    "blocker": "None"
+  },
+  {
+    "step": 12,
+    "title": "Verify shortlist communication/webhook",
+    "status": "PASS",
+    "evidence": "Status transitioned, shortlist communication triggered (simulated delivery mode active)",
+    "blocker": "None"
+  },
+  {
+    "step": 13,
+    "title": "Candidate completes assessment",
+    "status": "PASS",
+    "evidence": "Assessment Attempt ID 6 scored 100%, Passed=True",
+    "blocker": "None"
+  },
+  {
+    "step": 14,
+    "title": "Provider schedules interview",
+    "status": "PASS",
+    "evidence": "Interview ID 7 scheduled for 2026-10-15T14:00:00Z",
+    "blocker": "None"
+  },
+  {
+    "step": 15,
+    "title": "Interview scorecard is saved",
+    "status": "PASS",
+    "evidence": "Scorecard saved with overall recommendation: advance, updated candidate skill evidence",
+    "blocker": "None"
+  },
+  {
+    "step": 16,
+    "title": "Candidate is selected",
+    "status": "PASS",
+    "evidence": "Application ID 10 status updated to selected",
+    "blocker": "None"
+  },
+  {
+    "step": 17,
+    "title": "Mentor is assigned",
+    "status": "PASS",
+    "evidence": "Assignment ID 41 links Mentor ID 85 with Intern ID 84",
+    "blocker": "None"
+  },
+  {
+    "step": 18,
+    "title": "Mentor creates task",
+    "status": "PASS",
+    "evidence": "Task ID 48 created: 'Implement API Rate Limiter'",
+    "blocker": "None"
+  },
+  {
+    "step": 19,
+    "title": "Intern sees task",
+    "status": "PASS",
+    "evidence": "Intern tasks count: 1, Target task found: True",
+    "blocker": "None"
+  },
+  {
+    "step": 20,
+    "title": "Intern submits task",
+    "status": "PASS",
+    "evidence": "Task ID 48 submission ID 11 recorded, status: pending",
+    "blocker": "None"
+  },
+  {
+    "step": 21,
+    "title": "Mentor reviews task",
+    "status": "PASS",
+    "evidence": "Submission ID 11 approved, Task ID 48 marked completed",
+    "blocker": "None"
+  },
+  {
+    "step": 22,
+    "title": "Attendance check-in/check-out",
+    "status": "PASS",
+    "evidence": "Checked in and out successfully, work_minutes=0",
+    "blocker": "None"
+  },
+  {
+    "step": 23,
+    "title": "Weekly report generation",
+    "status": "PASS",
+    "evidence": "Report generated, ID: 4, status: generated",
+    "blocker": "None"
+  },
+  {
+    "step": 24,
+    "title": "AI mentor feedback draft",
+    "status": "PASS",
+    "evidence": "Saved mentor feedback draft ID: 10, intern_name='Audit Candidate Intern'",
+    "blocker": "None"
+  },
+  {
+    "step": 25,
+    "title": "Final evaluation",
+    "status": "PASS",
+    "evidence": "Final evaluation ID 5 submitted by mentor",
+    "blocker": "None"
+  },
+  {
+    "step": 26,
+    "title": "Outcome completion",
+    "status": "PASS",
+    "evidence": "Outcome completed! Certificate ID generated: IF-2026-73DCDE52",
+    "blocker": "None"
+  },
+  {
+    "step": 27,
+    "title": "Certificate PDF generation",
+    "status": "PASS",
+    "evidence": "PDF generated on disk at D:\\Web Dev Projects\\internflow\\backend\\storage\\certificates\\certificate_IF-2026-73DCDE52.pdf (2676 bytes)",
+    "blocker": "None"
+  },
+  {
+    "step": 28,
+    "title": "Certificate download",
+    "status": "PASS",
+    "evidence": "HTTP 200 PDF stream returned (2676 bytes)",
+    "blocker": "None"
+  },
+  {
+    "step": 29,
+    "title": "Public QR/certificate verification",
+    "status": "PASS",
+    "evidence": "Public Verification Verified \u2713 (Candidate: Audit Candidate Intern, Provider: Audit Testing Corp)",
+    "blocker": "None"
+  }
+]

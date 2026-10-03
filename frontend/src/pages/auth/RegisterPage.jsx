@@ -150,14 +150,14 @@ export default function RegisterPage({ onNavigate }) {
           )}
         </div>
 
-        {role === 'provider' && (
+        {(role === 'provider' || role === 'mentor') && (
           <div className="auth-field">
-            <label className="auth-label" htmlFor="reg-org">Organization</label>
+            <label className="auth-label" htmlFor="reg-org">Organization {role === 'mentor' && '(Optional)'}</label>
             <input
               id="reg-org"
               type="text"
               autoComplete="organization"
-              placeholder="e.g. Acme Innovations"
+              placeholder={role === 'mentor' ? "e.g. Acme Innovations" : "e.g. Acme Innovations"}
               value={orgName}
               onChange={(e) => { setOrgName(e.target.value); clearError('orgName'); }}
               onBlur={() => handleBlur('orgName')}
