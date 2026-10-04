@@ -53,6 +53,7 @@ import { screenApplication } from '../../services/internService';
 import { fetchApplicationDetail } from '../../services/skillService';
 import { createMentorAssignment, fetchAvailableMentors, fetchProviderAssignments, fetchProviderMenteeDetail } from '../../services/mentorshipFoundationService';
 import SkillChip from '../../components/common/SkillChip';
+import { ProviderDashboardContent } from './ProviderDashboardPage';
 import '../../styles/ProviderDashboard.css';
 import '../../styles/ProviderWorkspace.css';
 import '../../styles/Orchestration.css';
@@ -3671,6 +3672,7 @@ function Reports() {
 
 function renderWorkspace(path, onNavigate) {
   switch (path) {
+    case '/provider-dashboard': return <ProviderDashboardContent onNavigate={onNavigate} />;
     case '/provider-internships': return <InternshipList onNavigate={onNavigate} />;
     case '/provider-internship-new': return <CreateInternship onNavigate={onNavigate} />;
     case '/provider-internship-details': return <InternshipDetail onNavigate={onNavigate} />;
@@ -3687,13 +3689,23 @@ function renderWorkspace(path, onNavigate) {
     case '/provider-certificates': return <Certificates />;
     case '/provider-automation': return <Automation onNavigate={onNavigate} />;
     case '/provider-settings': return <SettingsPage />;
-    default: return <InternshipList onNavigate={onNavigate} />;
+    default: return <ProviderDashboardContent onNavigate={onNavigate} />;
   }
 }
 
 export default function ProviderWorkspacePage({ path, onNavigate }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const session = getSession();
+  const session = getSession('provider');
+  const user = session?.user || {};
+  const displayName = user.full_name || 'Provider';
+  const orgName = user.organization || user.full_name || 'Provider workspace';
+  const initials = (user.full_name || 'P')
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || 'P';
 
   const handleLogout = () => {
     clearSession();
@@ -3745,7 +3757,14 @@ export default function ProviderWorkspacePage({ path, onNavigate }) {
         </div>
 
         <div className="provider-sidebar-footer">
-          <button className="provider-nav-item" type="button" title="Logout" onClick={handleLogout}>
+          <div className="provider-user-pill" style={{ marginBottom: '8px' }}>
+            <div className="provider-user-avatar">{initials}</div>
+            <div className="provider-user-meta">
+              <strong>{displayName}</strong>
+              <small>{orgName}</small>
+            </div>
+          </div>
+          <button className="provider-nav-item provider-logout-btn" type="button" title="Logout" onClick={handleLogout}>
             <span className="provider-nav-icon"><LogOut size={18} /></span>
             <span className="provider-nav-label">Logout</span>
           </button>

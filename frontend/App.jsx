@@ -12,6 +12,7 @@ import InternWorkspacePage from './src/pages/intern/InternWorkspacePage';
 import { getSession } from './src/services/publicExperience';
 
 const providerWorkspacePaths = new Set([
+  '/provider-dashboard',
   '/provider-internships',
   '/provider-internship-new',
   '/provider-internship-details',

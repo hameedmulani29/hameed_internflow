@@ -78,7 +78,7 @@ function Sidebar({ onNavigate }) {
   );
 }
 
-export default function ProviderDashboardPage({ onNavigate }) {
+export function ProviderDashboardContent({ onNavigate }) {
   const session = getSession('provider');
   const user = session?.user || {};
 
@@ -151,39 +151,18 @@ export default function ProviderDashboardPage({ onNavigate }) {
     : [];
 
   return (
-    <div className="provider-app-shell provider-dashboard-shell">
-      <div className="provider-background-network" aria-hidden="true">
-        <span className="provider-network-line provider-network-line-a" />
-        <span className="provider-network-line provider-network-line-b" />
-        <span className="provider-network-line provider-network-line-c" />
-        <span className="provider-network-dot provider-network-dot-a" />
-        <span className="provider-network-dot provider-network-dot-b" />
-        <span className="provider-network-dot provider-network-dot-c" />
-      </div>
+    <div className="provider-dashboard-view">
+      <header className="provider-workspace-header" style={{ marginBottom: '20px' }}>
+        <div>
+          <p className="provider-eyebrow" style={{ margin: '0 0 4px' }}>Operations overview</p>
+          <h1 style={{ margin: 0 }}>Welcome back, {displayName}</h1>
+          <p className="provider-workspace-description">
+            Live counts from your internships, applications, and programs currently in delivery.
+          </p>
+        </div>
+      </header>
 
-      <Sidebar onNavigate={onNavigate} />
-
-      <main className="provider-dashboard-main">
-        <header className="provider-topbar">
-          <div>
-            <p className="provider-greeting">Welcome back, {displayName}</p>
-            <h1>Here&apos;s what&apos;s happening across your programs</h1>
-          </div>
-
-          <div className="provider-topbar-actions">
-            <button type="button" className="provider-icon-button" aria-label="Search">
-              <Search size={18} />
-            </button>
-            <button type="button" className="provider-icon-button" aria-label="Notifications">
-              <Bell size={18} />
-            </button>
-            <button type="button" className="provider-profile-chip" aria-label="Account">
-              <span className="provider-profile-avatar">{initials}</span>
-            </button>
-          </div>
-        </header>
-
-        <section className="provider-hero-row">
+      <section className="provider-hero-row">
           <div className="provider-hero-copy">
             <p className="provider-eyebrow">Operations overview</p>
             <h2>Live counts from your internships, applications, and internships currently in delivery.</h2>
@@ -368,7 +347,10 @@ export default function ProviderDashboardPage({ onNavigate }) {
             </section>
           </>
         )}
-      </main>
     </div>
   );
+}
+
+export default function ProviderDashboardPage({ onNavigate }) {
+  return <ProviderDashboardContent onNavigate={onNavigate} />;
 }

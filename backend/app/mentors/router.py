@@ -1,3 +1,4 @@
+from app.applications.screening_service import logger
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
@@ -85,7 +86,7 @@ def ensure_assignment(db, mentor, intern):
 
 
 @router.post('/assignments', status_code=201)
-def create_assignment(payload: AssignmentInput, token=Depends(require_roles('provider'))):
+async def create_assignment(payload: AssignmentInput, token=Depends(require_roles('provider'))):
     provider = int(token['sub'])
     with get_db() as db:
         mentor = db.execute("SELECT id, full_name, email, organization FROM users WHERE id = ? AND role = 'mentor'", (payload.mentor_id,)).fetchone()
@@ -169,6 +170,23 @@ def create_assignment(payload: AssignmentInput, token=Depends(require_roles('pro
                WHERE ma.id = ?''',
             (assign_id,),
         ).fetchone()
+
+        # Real-time broadcast to mentor & intern
+        try:
+            intern_name = dict(intern).get('full_name', f'Intern #{payload.intern_id}')
+            await record_and_broadcast_activity(
+                db=db,
+                actor_id=provider,
+                actor_role='provider',
+                event_type='mentor_assigned',
+                mentor_id=payload.mentor_id,
+                title='New Intern Assigned',
+                description=f'Provider assigned {intern_name} to your mentorship queue.',
+                intern_id=payload.intern_id,
+                metadata={'assignment_id': assign_id, 'internship_id': internship_id}
+            )
+        except Exception as broadcast_err:
+            logger.warning(f'Could not broadcast mentor_assigned event: {broadcast_err}')
 
     return serialize(row)
 

@@ -1741,7 +1741,17 @@ export default function MentorWorkspacePage(props) {
       },
     });
 
-    return () => unsubscribe();
+    const handleProviderChange = () => {
+      setRefresh((val) => val + 1);
+    };
+    window.addEventListener('internflow_provider_changed', handleProviderChange);
+    window.addEventListener('storage', handleProviderChange);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('internflow_provider_changed', handleProviderChange);
+      window.removeEventListener('storage', handleProviderChange);
+    };
   }, []);
 
   // Intern → mentor feedback: fetched for the dedicated page and the dashboard preview.
