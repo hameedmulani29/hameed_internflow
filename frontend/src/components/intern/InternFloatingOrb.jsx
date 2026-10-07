@@ -143,7 +143,7 @@ export default function InternFloatingOrb({ currentPath, onNavigate }) {
   };
 
   const handleLogout = () => {
-    clearSession();
+    clearSession('intern');
     if (onNavigate) onNavigate('/login');
   };
 
