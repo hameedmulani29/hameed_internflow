@@ -1798,7 +1798,7 @@ export default function MentorWorkspacePage(props) {
   const reload = () => setRefresh((val) => val + 1);
 
   const logout = () => {
-    clearSession();
+    clearSession('mentor');
     onNavigate('/login');
   };
 

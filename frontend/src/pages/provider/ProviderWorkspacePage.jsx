@@ -3708,7 +3708,7 @@ export default function ProviderWorkspacePage({ path, onNavigate }) {
     .toUpperCase() || 'P';
 
   const handleLogout = () => {
-    clearSession();
+    clearSession('provider');
     onNavigate('/login');
   };
 

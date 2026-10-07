@@ -52,12 +52,10 @@ export async function request(path, options = {}) {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    // Expired/invalid session: clear the dead session for this role and notify
-    // the app so protected pages re-render to login instead of showing an
-    // un-actionable error forever. 401 is only treated as expiry when a token
-    // was actually attached.
+    // Expired/invalid session: clear the dead session ONLY for the affected role
+    // so protected pages for this role re-render to login without affecting other roles.
     if (response.status === 401 && token) {
-      const clearRole = role || undefined;
+      const clearRole = role || session?.user?.role || undefined;
       try { clearSession(clearRole); } catch { /* storage unavailable */ }
       try { window.dispatchEvent(new Event('internflow_session_changed')); } catch { /* non-DOM */ }
     }
@@ -88,13 +86,14 @@ export function getSession(preferredRole = null) {
       return null;
     }
 
+    // Un-scoped call outside any role path: return role-specific sessions first
+    for (const role of ['provider', 'mentor', 'intern']) {
+      const s = JSON.parse(localStorage.getItem(`internflow_session_${role}`) || 'null');
+      if (s?.token && s?.user?.role === role) return s;
+    }
+
     const primarySession = JSON.parse(localStorage.getItem('internflow_session') || 'null');
     if (primarySession?.token) return primarySession;
-
-    for (const role of ['intern', 'provider', 'mentor']) {
-      const s = JSON.parse(localStorage.getItem(`internflow_session_${role}`) || 'null');
-      if (s?.token) return s;
-    }
 
     return null;
   } catch {
@@ -103,18 +102,25 @@ export function getSession(preferredRole = null) {
 }
 
 export function clearSession(role = null) {
-  if (role) {
-    localStorage.removeItem(`internflow_session_${role}`);
-  } else {
+  let targetRole = role;
+  if (!targetRole) {
     const path = typeof window !== 'undefined' ? window.location.pathname || '' : '';
-    if (path.startsWith('/provider')) localStorage.removeItem('internflow_session_provider');
-    else if (path.startsWith('/intern') || path === '/mentor-feedback') localStorage.removeItem('internflow_session_intern');
-    else if (path.startsWith('/mentor')) localStorage.removeItem('internflow_session_mentor');
+    if (path.startsWith('/provider')) targetRole = 'provider';
+    else if (path.startsWith('/intern') || path === '/mentor-feedback') targetRole = 'intern';
+    else if (path.startsWith('/mentor')) targetRole = 'mentor';
+  }
 
-    const current = getSession();
-    if (current?.user?.role) {
-      localStorage.removeItem(`internflow_session_${current.user.role}`);
+  if (targetRole) {
+    localStorage.removeItem(`internflow_session_${targetRole}`);
+    const primary = JSON.parse(localStorage.getItem('internflow_session') || 'null');
+    if (primary?.user?.role === targetRole) {
+      localStorage.removeItem('internflow_session');
     }
+  } else {
+    // Explicit global logout without role context
+    localStorage.removeItem('internflow_session_provider');
+    localStorage.removeItem('internflow_session_mentor');
+    localStorage.removeItem('internflow_session_intern');
     localStorage.removeItem('internflow_session');
   }
   window.dispatchEvent(new Event('internflow_session_changed'));

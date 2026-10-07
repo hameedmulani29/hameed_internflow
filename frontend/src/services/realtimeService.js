@@ -13,7 +13,7 @@ export function subscribeToInternships({ onInternshipPublished, onReconnect }) {
   let isClosedIntentionally = false;
 
   function getWsUrl() {
-    const session = getSession();
+    const session = getSession('intern') || getSession();
     const token = session?.token || '';
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
@@ -96,7 +96,7 @@ export function subscribeToInternEvents({ onEvent, onConnect, onDisconnect, onRe
   let isClosedIntentionally = false;
 
   function getWsUrl() {
-    const session = getSession();
+    const session = getSession('intern');
     const token = session?.token || '';
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
@@ -181,7 +181,7 @@ export function subscribeToMentorMonitoring({ onEvent, onConnect, onDisconnect, 
   let isClosedIntentionally = false;
 
   function getWsUrl() {
-    const session = getSession();
+    const session = getSession('mentor');
     const token = session?.token || '';
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
