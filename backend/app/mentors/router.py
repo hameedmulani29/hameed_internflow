@@ -132,30 +132,49 @@ async def create_assignment(payload: AssignmentInput, token=Depends(require_role
             db.execute(
                 '''UPDATE mentor_assignments
                    SET status = 'completed'
-                   WHERE intern_id = ? AND internship_id = ? AND mentor_id != ? AND status = 'active' ''',
+                   WHERE intern_id = ? AND internship_id = ? AND mentor_id IS NOT NULL AND mentor_id != ? AND status = 'active' ''',
                 (payload.intern_id, internship_id, payload.mentor_id),
             )
 
-        existing = db.execute(
-            'SELECT id FROM mentor_assignments WHERE mentor_id = ? AND intern_id = ?',
+        active_same = db.execute(
+            "SELECT id FROM mentor_assignments WHERE mentor_id = ? AND intern_id = ? AND status = 'active'",
             (payload.mentor_id, payload.intern_id),
         ).fetchone()
+        if active_same:
+            raise HTTPException(status_code=409, detail='Intern is already assigned to this mentor.')
 
-        if existing:
+        unassigned = db.execute(
+            "SELECT id FROM mentor_assignments WHERE mentor_id IS NULL AND intern_id = ? AND status = 'active'",
+            (payload.intern_id,),
+        ).fetchone()
+
+        if unassigned:
             db.execute(
-                '''UPDATE mentor_assignments
-                   SET status = 'active', internship_id = COALESCE(?, internship_id), created_at = CURRENT_TIMESTAMP
-                   WHERE id = ?''',
-                (internship_id, existing['id']),
+                "UPDATE mentor_assignments SET mentor_id = ?, internship_id = COALESCE(?, internship_id), created_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (payload.mentor_id, internship_id, unassigned['id']),
             )
-            assign_id = existing['id']
+            assign_id = unassigned['id']
         else:
-            cursor = db.execute(
-                'INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (%s, %s, %s, %s) RETURNING id',
-                (payload.mentor_id, payload.intern_id, internship_id, 'active'),
-            )
-            ret = cursor.fetchone()
-            assign_id = ret['id'] if isinstance(ret, dict) or (hasattr(ret, '__getitem__') and 'id' in ret) else ret[0]
+            existing = db.execute(
+                'SELECT id FROM mentor_assignments WHERE mentor_id = ? AND intern_id = ?',
+                (payload.mentor_id, payload.intern_id),
+            ).fetchone()
+
+            if existing:
+                db.execute(
+                    '''UPDATE mentor_assignments
+                       SET status = 'active', internship_id = COALESCE(?, internship_id), created_at = CURRENT_TIMESTAMP
+                       WHERE id = ?''',
+                    (internship_id, existing['id']),
+                )
+                assign_id = existing['id']
+            else:
+                cursor = db.execute(
+                    'INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (%s, %s, %s, %s) RETURNING id',
+                    (payload.mentor_id, payload.intern_id, internship_id, 'active'),
+                )
+                ret = cursor.fetchone()
+                assign_id = ret['id'] if isinstance(ret, dict) or (hasattr(ret, '__getitem__') and 'id' in ret) else ret[0]
 
         db.commit()
 

@@ -395,6 +395,152 @@ export default function InternDashboardPage({ onNavigate }) {
         </div>
       )}
 
+      {/* MY INTERNSHIP — Active Internship Workspace Card */}
+      {workspace?.assignment && (
+        <section className="dashboard-section" style={{ marginTop: '1.25rem' }} aria-label="My Active Internship">
+          <div className="glass-card" style={{ padding: '1.5rem', background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95))', color: '#fff', borderRadius: '16px', border: '1px solid rgba(56, 189, 248, 0.3)', boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.4rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.05em', color: '#38bdf8', textTransform: 'uppercase' }}>MY INTERNSHIP</span>
+                  <span style={{ background: '#10b981', color: '#fff', fontSize: '0.7rem', fontWeight: 700, padding: '2px 10px', borderRadius: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    ● ACTIVE
+                  </span>
+                </div>
+                <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700, color: '#f8fafc' }}>
+                  {workspace.internship?.title || 'Active Internship'}
+                </h2>
+                <p style={{ margin: '0.2rem 0 0', fontSize: '0.95rem', color: '#94a3b8' }}>
+                  {workspace.internship?.organization || workspace.internship?.provider_name || 'Partner Company'}
+                </p>
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={() => onNavigate && onNavigate('/intern/internship')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '0.65rem 1.25rem', fontSize: '0.9rem', fontWeight: 600, background: 'linear-gradient(135deg, #0284c7, #4f46e5)', border: 0, boxShadow: '0 4px 14px rgba(2, 132, 199, 0.4)' }}
+              >
+                <GraduationCap size={18} />
+                <span>Open My Workspace</span>
+                <ArrowRight size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.25rem', marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
+              <div>
+                <span style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Assigned Mentor</span>
+                <strong style={{ fontSize: '0.95rem', color: '#f1f5f9' }}>
+                  {workspace.mentor?.name ? workspace.mentor.name : 'No mentor assigned yet'}
+                </strong>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Overall Progress</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ flex: 1, height: 8, borderRadius: 4, background: 'rgba(255, 255, 255, 0.15)', overflow: 'hidden' }}>
+                    <div style={{ width: `${progressPercent}%`, height: '100%', background: 'linear-gradient(90deg, #38bdf8, #818cf8)' }} />
+                  </div>
+                  <strong style={{ fontSize: '0.9rem', color: '#38bdf8' }}>{progressPercent}%</strong>
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Workload</span>
+                <strong style={{ fontSize: '0.95rem', color: '#f1f5f9' }}>
+                  {tasks.length} total tasks ({completedTasks.length} completed)
+                </strong>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* MY APPLICATIONS Section */}
+      {applications.length > 0 && (
+        <section className="dashboard-section" style={{ marginTop: '1.5rem' }} aria-label="My Applications">
+          <div className="glass-card" style={{ padding: '1.25rem' }}>
+            <div className="section-header" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <h2 className="section-title" style={{ fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <FileCheck size={18} className="text-cyan" />
+                  My Applications ({applications.length})
+                </h2>
+                <p className="section-subtitle" style={{ fontSize: '0.82rem' }}>Track status of your submitted internship applications</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+              {applications.map((app) => (
+                <div
+                  key={app.id}
+                  style={{
+                    border: app.status === 'selected' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #e2e8f0',
+                    borderRadius: '12px',
+                    padding: '1.1rem',
+                    background: app.status === 'selected' ? 'rgba(240, 253, 244, 0.8)' : '#ffffff',
+                    boxShadow: '0 2px 8px rgba(15, 23, 42, 0.04)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                      <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#0f172a' }}>
+                        {app.internship?.title || 'Internship Application'}
+                      </h3>
+                      <span
+                        style={{
+                          padding: '3px 10px',
+                          borderRadius: '12px',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          background:
+                            app.status === 'selected'
+                              ? '#dcfce7'
+                              : app.status === 'shortlisted' || app.status === 'interview'
+                              ? '#e0f2fe'
+                              : app.status === 'rejected'
+                              ? '#fee2e2'
+                              : '#f1f5f9',
+                          color:
+                            app.status === 'selected'
+                              ? '#15803d'
+                              : app.status === 'shortlisted' || app.status === 'interview'
+                              ? '#0369a1'
+                              : app.status === 'rejected'
+                              ? '#b91c1c'
+                              : '#475569',
+                        }}
+                      >
+                        {APP_STATUS_LABELS[app.status] || app.status}
+                      </span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
+                      {app.internship?.provider_name || 'Partner Provider'}
+                    </p>
+                    {app.created_at && (
+                      <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Calendar size={12} /> Applied: {new Date(app.created_at).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+
+                  <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      className="btn btn-outline btn-xs"
+                      onClick={() => onNavigate && onNavigate(`/intern/applications/${app.id}/track`)}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem' }}
+                    >
+                      <span>View Application</span>
+                      <ArrowRight size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Orchestration strip: what to do today, current milestone, blockers, weekly progress */}
       <section className="dashboard-section" style={{ marginTop: '1rem' }} aria-label="Today's focus">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '0.9rem' }}>

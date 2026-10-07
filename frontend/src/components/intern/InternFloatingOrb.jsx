@@ -8,10 +8,11 @@ import {
   Sparkles,
   X,
   LogOut,
-  MessagesSquare
+  MessagesSquare,
+  Briefcase
 } from 'lucide-react';
 import { clearSession } from '../../services/publicExperience';
-import { fetchMyApplications } from '../../services/internService';
+import { fetchMyApplications, fetchInternWorkspace } from '../../services/internService';
 import { fetchUnreadFeedbackCount } from '../../services/mentorFeedbackService';
 import '../../styles/InternFloatingOrb.css';
 
@@ -32,6 +33,8 @@ export default function InternFloatingOrb({ currentPath, onNavigate }) {
   // Latest real application id from the backend; null until one exists.
   const [activeAppId, setActiveAppId] = useState(null);
   const [unreadFeedbackCount, setUnreadFeedbackCount] = useState(0);
+  const [hasActiveWorkspace, setHasActiveWorkspace] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -44,6 +47,17 @@ export default function InternFloatingOrb({ currentPath, onNavigate }) {
       .catch(() => {
         /* Orb navigation still works; tracking entries just stay hidden. */
       });
+
+    fetchInternWorkspace()
+      .then((res) => {
+        if (isMounted && res?.assignment) {
+          setHasActiveWorkspace(true);
+          if (res.internship?.id) {
+            setWorkspaceId(res.internship.id);
+          }
+        }
+      })
+      .catch(() => {});
 
     fetchUnreadFeedbackCount()
       .then((res) => {
@@ -157,6 +171,18 @@ export default function InternFloatingOrb({ currentPath, onNavigate }) {
       isActive: currentPath === '/intern/dashboard',
       colorClass: 'radial-cyan'
     },
+    ...(hasActiveWorkspace
+      ? [
+          {
+            id: 'my-workspace',
+            name: 'My Workspace',
+            icon: Briefcase,
+            path: workspaceId ? `/intern/internship/${workspaceId}` : '/intern/internship',
+            isActive: currentPath.startsWith('/intern/internship') || currentPath === '/intern/my-workspace' || currentPath === '/intern/workspace',
+            colorClass: 'radial-emerald'
+          }
+        ]
+      : []),
     {
       id: 'explore',
       name: 'Explore',
