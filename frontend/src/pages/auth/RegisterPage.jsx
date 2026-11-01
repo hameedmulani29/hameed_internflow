@@ -94,7 +94,11 @@ export default function RegisterPage({ onNavigate }) {
         <div className="auth-heading" style={{ textAlign: 'center' }}>
           <CheckCircle2 size={52} color="#4ADE80" style={{ margin: '0 auto 1rem auto' }} />
           <h1>Account created!</h1>
-          <p>You&apos;re all set as a {activeRole.name.toLowerCase()}. Redirecting you to sign in...</p>
+          {role === 'mentor' ? (
+            <p>Your mentor account has been created and is pending provider verification. Once your organization administrator verifies your account, you will be able to access the Mentor Workspace. Redirecting to sign in...</p>
+          ) : (
+            <p>You&apos;re all set as a {activeRole.name.toLowerCase()}. Redirecting you to sign in...</p>
+          )}
         </div>
       </AuthLayout>
     );
