@@ -97,7 +97,7 @@ const titles = {
 };
 
 // Fallback Mock Data for immediate production-readiness
-function useMentorData(path) {
+function useMentorData(path, refresh = 0) {
   const [state, setState] = useState({ data: null, loading: false, error: '' });
 
   useEffect(() => {
@@ -134,7 +134,7 @@ function useMentorData(path) {
     return () => {
       active = false;
     };
-  }, [path]);
+  }, [path, refresh]);
 
   return state;
 }
@@ -1711,7 +1711,7 @@ export default function MentorWorkspacePage(props) {
   const session = getSession();
   const [refresh, setRefresh] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { data, error } = useMentorData(path);
+  const { data, error } = useMentorData(path, refresh);
   const [interns, setInterns] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState('offline');
   const [liveActivities, setLiveActivities] = useState([]);
@@ -1745,11 +1745,13 @@ export default function MentorWorkspacePage(props) {
       setRefresh((val) => val + 1);
     };
     window.addEventListener('internflow_provider_changed', handleProviderChange);
+    window.addEventListener('provider_mentors_updated', handleProviderChange);
     window.addEventListener('storage', handleProviderChange);
 
     return () => {
       unsubscribe();
       window.removeEventListener('internflow_provider_changed', handleProviderChange);
+      window.removeEventListener('provider_mentors_updated', handleProviderChange);
       window.removeEventListener('storage', handleProviderChange);
     };
   }, []);
