@@ -4,6 +4,7 @@ import {
   BriefcaseBusiness,
   CheckCircle2,
   ChevronRight,
+  ClipboardCheck,
   Clock3,
   FileText,
   LayoutDashboard,
@@ -12,13 +13,14 @@ import {
   Settings,
   Sparkles,
   TrendingUp,
+  UserPlus,
   Users,
   Zap,
 } from 'lucide-react';
 import logoUrl from '../../assets/logo.png';
 import { fetchInternships, fetchApplications, getSession } from '../../services/publicExperience';
 import { fetchProviderInterviews } from '../../services/phase20Service';
-import { fetchProviderAssignments } from '../../services/mentorshipFoundationService';
+import { fetchAvailableMentors, fetchProviderAssignments } from '../../services/mentorshipFoundationService';
 import { fetchScreeningQueue } from '../../services/internService';
 import '../../styles/ProviderDashboard.css';
 
@@ -27,14 +29,16 @@ const sidebarItems = [
   { label: 'Internships', path: '/provider-internships', icon: BriefcaseBusiness },
   { label: 'Applications', path: '/provider-applications', icon: FileText },
   { label: 'Interviews', path: '/provider-interviews', icon: Clock3 },
-  { label: 'Interns', path: '/provider-interns', icon: Users },
+  { label: 'Assessments', path: '/provider-assessments', icon: ClipboardCheck },
+  { label: 'Active Interns', path: '/provider-interns', icon: Users },
+  { label: 'Mentors', path: '/provider-mentors', icon: UserPlus },
   { label: 'Reports', path: '/provider-reports', icon: TrendingUp },
   { label: 'Certificates', path: '/provider-certificates', icon: CheckCircle2 },
   { label: 'Automation', path: '/provider-automation', icon: Zap },
   { label: 'Settings', path: '/provider-settings', icon: Settings },
 ];
 
-function Sidebar({ onNavigate }) {
+function Sidebar({ onNavigate, currentPath = '/provider-dashboard' }) {
   const session = getSession('provider');
   const user = session?.user || {};
   const displayName = user.full_name || 'Provider';
@@ -57,7 +61,7 @@ function Sidebar({ onNavigate }) {
 
         <nav className="provider-nav">
           {sidebarItems.map(({ label, path, icon: Icon }) => (
-            <button type="button" key={label} className={`provider-nav-item ${path === '/provider-dashboard' ? 'is-active' : ''}`} title={label} onClick={() => onNavigate(path)}>
+            <button type="button" key={label} className={`provider-nav-item ${path === currentPath ? 'is-active' : ''}`} title={label} onClick={() => onNavigate(path)}>
               <span className="provider-nav-icon"><Icon size={18} /></span>
               <span className="provider-nav-label">{label}</span>
             </button>
@@ -104,14 +108,16 @@ export function ProviderDashboardContent({ onNavigate }) {
       fetchScreeningQueue(),
       fetchProviderInterviews().catch(() => ({ items: [] })),
       fetchProviderAssignments().catch(() => ({ items: [] })),
+      fetchAvailableMentors().catch(() => ({ items: [] })),
     ])
-      .then(([internships, applications, queue, interviews, assignments]) => {
+      .then(([internships, applications, queue, interviews, assignments, mentors]) => {
         setData({
           internships: internships.items || [],
           applications: applications.items || [],
           queue,
           interviews: interviews.items || [],
           assignments: assignments.items || [],
+          mentors: mentors.items || [],
         });
       })
       .catch((requestError) => setError(requestError?.message || 'Could not load your dashboard.'))
@@ -132,6 +138,7 @@ export function ProviderDashboardContent({ onNavigate }) {
         screeningDone: data.queue.filter((s) => s.status === 'completed').length,
         interviews: data.interviews.length,
         interviewsScheduled: data.interviews.filter((i) => ['scheduled', 'confirmed'].includes(i.status)).length,
+        pendingMentors: (data.mentors || []).filter((m) => m.verification_status === 'Pending Verification').length,
         interns: new Set(
           data.assignments
             .filter((a) => (a.status || '') === 'active')
@@ -292,6 +299,7 @@ export function ProviderDashboardContent({ onNavigate }) {
                 <div className="provider-actions-list">
                   {[
                     { icon: FileText, label: 'Applications awaiting review', count: counts.pendingReview, action: 'Review candidates', tone: 'warning', path: '/provider-applications' },
+                    { icon: UserPlus, label: 'Mentors pending verification', count: counts.pendingMentors, action: 'Verify & approve', tone: counts.pendingMentors > 0 ? 'warning' : 'neutral', path: '/provider-mentors' },
                     { icon: Clock3, label: 'Interviews scheduled', count: counts.interviewsScheduled, action: 'Open interviews', tone: 'info', path: '/provider-interviews' },
                     { icon: Zap, label: 'AI screenings completed', count: counts.screeningDone, action: 'View screening', tone: 'neutral', path: '/provider-screening' },
                     { icon: Users, label: 'Active interns', count: counts.interns, action: 'View interns', tone: 'danger', path: '/provider-interns' },

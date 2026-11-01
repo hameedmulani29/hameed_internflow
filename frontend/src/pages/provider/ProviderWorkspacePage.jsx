@@ -23,7 +23,13 @@ import {
   Sparkles,
   Trash2,
   UserPlus,
+  UserMinus,
+  UserCheck,
+  UserX,
   Users,
+  Clock,
+  Eye,
+  Building,
   X,
   Zap,
 } from 'lucide-react';
@@ -51,7 +57,7 @@ import {
 } from '../../services/phase20Service';
 import { screenApplication } from '../../services/internService';
 import { fetchApplicationDetail } from '../../services/skillService';
-import { createMentorAssignment, fetchAvailableMentors, fetchProviderAssignments, fetchProviderMenteeDetail } from '../../services/mentorshipFoundationService';
+import { addMentor, approveMentorAccount, createMentorAssignment, fetchAvailableMentors, fetchProviderAssignments, fetchProviderMenteeDetail, removeMentorAssignment, revokeMentorAccount, removeMentorFromOrg } from '../../services/mentorshipFoundationService';
 import SkillChip from '../../components/common/SkillChip';
 import { ProviderDashboardContent } from './ProviderDashboardPage';
 import '../../styles/ProviderDashboard.css';
@@ -1498,6 +1504,12 @@ function CandidateDetail({ onNavigate }) {
       setAssignState((prev) => ({ ...prev, submitting: false, done: true }));
       setToast(`${detail.candidate.name} assigned to ${mentorName}.`);
       setTimeout(() => setToast(''), 4000);
+      try {
+        window.dispatchEvent(new Event('provider_mentors_updated'));
+        window.dispatchEvent(new Event('internflow_provider_changed'));
+      } catch {
+        // ignore
+      }
     } catch (requestError) {
       setAssignState((prev) => ({ ...prev, submitting: false, error: requestError?.message || 'Could not create the assignment.' }));
     }
@@ -2988,6 +3000,23 @@ function Automation({ onNavigate }) {
 // Derived entirely from the provider-scoped assignments endpoint, so a
 // mentor only appears if the provider's own internship links them.
 
+function getWorkingTime(createdAt) {
+  if (!createdAt) return 'Recently joined';
+  const start = new Date(createdAt);
+  const now = new Date();
+  if (isNaN(start.getTime())) return 'Recently joined';
+  const diffMs = Math.max(0, now - start);
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays < 1) return 'Joined today';
+  if (diffDays === 1) return '1 day with org';
+  if (diffDays < 30) return `${diffDays} days with org`;
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) return `${diffMonths} mo${diffMonths > 1 ? 's' : ''} with org`;
+  const diffYears = Math.floor(diffMonths / 12);
+  const remMonths = diffMonths % 12;
+  return `${diffYears} yr${diffYears > 1 ? 's' : ''}${remMonths > 0 ? ` ${remMonths} mo` : ''} with org`;
+}
+
 function Mentors({ onNavigate }) {
   const [mentorsList, setMentorsList] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -2997,29 +3026,114 @@ function Mentors({ onNavigate }) {
   const [selectedMentor, setSelectedMentor] = useState(null);
   const [internsList, setInternsList] = useState([]);
   const [assignForm, setAssignForm] = useState({ internId: '', internshipId: '', submitting: false, error: '', done: false });
+  const [unassigningId, setUnassigningId] = useState(null);
+  const [processingId, setProcessingId] = useState(null);
+  const [addMentorModal, setAddMentorModal] = useState({ open: false, tab: 'applicants', fullName: '', email: '', password: '', submitting: false, error: '', done: false });
 
-  const loadMentors = () => {
-    setIsLoading(true);
+  // Custom In-App Pop-up Modal States
+  const [noticeModal, setNoticeModal] = useState({ open: false, title: '', message: '', type: 'success' });
+  const [confirmModal, setConfirmModal] = useState({ open: false, title: '', message: '', actionType: '', targetId: null, targetName: '', mentorName: '', submitting: false });
+
+  const showNotice = (title, message, type = 'success') => {
+    setNoticeModal({ open: true, title, message, type });
+  };
+
+  const triggerRealtimeSync = () => {
+    try {
+      window.dispatchEvent(new Event('provider_mentors_updated'));
+      window.dispatchEvent(new Event('internflow_provider_changed'));
+    } catch {
+      // ignore
+    }
+  };
+
+  const loadMentors = (silent = false) => {
+    if (!silent) setIsLoading(true);
     setError('');
     fetchAvailableMentors()
       .then((result) => setMentorsList(result.items || []))
-      .catch((requestError) => setError(requestError?.message || 'Could not load mentors.'))
-      .finally(() => setIsLoading(false));
+      .catch((requestError) => {
+        if (!silent) setError(requestError?.message || 'Could not load mentors.');
+      })
+      .finally(() => {
+        if (!silent) setIsLoading(false);
+      });
   };
 
   useEffect(() => {
-    Promise.resolve().then(loadMentors);
+    loadMentors(false);
+
+    // 4-second real-time sync polling
+    const interval = setInterval(() => {
+      loadMentors(true);
+    }, 4000);
+
+    const handleSyncEvent = () => loadMentors(true);
+    window.addEventListener('provider_mentors_updated', handleSyncEvent);
+    window.addEventListener('focus', handleSyncEvent);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('provider_mentors_updated', handleSyncEvent);
+      window.removeEventListener('focus', handleSyncEvent);
+    };
   }, []);
+
+  const handleExecuteCreateMentor = () => {
+    if (!addMentorModal.fullName || !addMentorModal.email || !addMentorModal.password) {
+      setAddMentorModal((p) => ({ ...p, error: 'All fields are required.' }));
+      return;
+    }
+    setAddMentorModal((p) => ({ ...p, submitting: true, error: '' }));
+    addMentor({ fullName: addMentorModal.fullName, email: addMentorModal.email, password: addMentorModal.password })
+      .then(() => {
+        setAddMentorModal((p) => ({ ...p, submitting: false, done: true }));
+        showNotice('Mentor Account Created', `${addMentorModal.fullName} has been added as a mentor to your organization scope.`, 'success');
+        loadMentors(true);
+        triggerRealtimeSync();
+      })
+      .catch((err) => {
+        setAddMentorModal((p) => ({ ...p, submitting: false, error: err?.message || 'Failed to create mentor account.' }));
+      });
+  };
 
   const handleOpenAssignModal = (mentor) => {
     setSelectedMentor(mentor);
     setAssignForm({ internId: '', internshipId: '', submitting: false, error: '', done: false });
-    fetchProviderAssignments()
-      .then((res) => {
-        const items = res.items || [];
-        setInternsList(items);
+    Promise.all([
+      fetchApplications().catch(() => []),
+      fetchProviderAssignments().catch(() => ({ items: [] })),
+    ])
+      .then(([appsRes, assignsRes]) => {
+        const candidateMap = new Map();
+        const rawApps = Array.isArray(appsRes) ? appsRes : (appsRes?.items || []);
+        rawApps.forEach((app) => {
+          const internId = app.applicant_id || app.candidate?.id || app.user_id;
+          const internName = app.candidate?.name || app.applicant_name || app.candidate_name || app.full_name;
+          if (internId && !candidateMap.has(String(internId))) {
+            candidateMap.set(String(internId), {
+              intern_id: internId,
+              intern_name: internName || `Intern #${internId}`,
+              internship_id: app.internship_id || app.internship?.id,
+              internship_title: app.internship?.title || app.internship_title,
+            });
+          }
+        });
+        (assignsRes.items || []).forEach((a) => {
+          if (a.intern_id && !candidateMap.has(String(a.intern_id))) {
+            candidateMap.set(String(a.intern_id), {
+              intern_id: a.intern_id,
+              intern_name: a.intern_name,
+              internship_id: a.internship_id,
+              internship_title: a.internship_title,
+            });
+          }
+        });
+        setInternsList(Array.from(candidateMap.values()));
       })
-      .catch(() => {});
+      .catch(() => {
+        setInternsList([]);
+      });
   };
 
   const handleExecuteAssign = () => {
@@ -3035,11 +3149,96 @@ function Mentors({ onNavigate }) {
     })
       .then(() => {
         setAssignForm((prev) => ({ ...prev, submitting: false, done: true }));
-        loadMentors();
+        showNotice('Intern Assigned', `Intern assigned to ${selectedMentor.full_name} successfully!`, 'success');
+        loadMentors(true);
+        triggerRealtimeSync();
       })
       .catch((err) => {
         setAssignForm((prev) => ({ ...prev, submitting: false, error: err?.message || 'Failed to assign mentor.' }));
       });
+  };
+
+  const handleApprove = (mentorId, mentorName = '') => {
+    setProcessingId(mentorId);
+    approveMentorAccount(mentorId)
+      .then(() => {
+        showNotice('Mentor Verified', `${mentorName || 'Mentor'} account has been verified and granted access.`, 'success');
+        loadMentors(true);
+        triggerRealtimeSync();
+      })
+      .catch((err) => showNotice('Verification Failed', err?.message || 'Could not approve mentor.', 'error'))
+      .finally(() => setProcessingId(null));
+  };
+
+  const handleRevoke = (mentorId, mentorName = '') => {
+    setProcessingId(mentorId);
+    revokeMentorAccount(mentorId)
+      .then(() => {
+        showNotice('Access Revoked', `Workspace access for ${mentorName || 'this mentor'} has been revoked.`, 'success');
+        loadMentors(true);
+        triggerRealtimeSync();
+      })
+      .catch((err) => showNotice('Revoke Failed', err?.message || 'Could not revoke mentor access.', 'error'))
+      .finally(() => setProcessingId(null));
+  };
+
+  const handleRequestRemoveFromOrg = (mentorId, mentorName = '') => {
+    setConfirmModal({
+      open: true,
+      title: 'Remove Mentor from Organization',
+      message: `Are you sure you want to completely remove ${mentorName || 'this mentor'} from your organization? Active intern assignments for this mentor will also be cancelled.`,
+      actionType: 'remove_mentor',
+      targetId: mentorId,
+      targetName: mentorName,
+      submitting: false,
+    });
+  };
+
+  const handleRequestUnassign = (asg, mentorName = '') => {
+    setConfirmModal({
+      open: true,
+      title: 'Unassign Intern',
+      message: `Are you sure you want to remove ${asg.intern_name || 'this intern'} from ${mentorName || 'this mentor'}?`,
+      actionType: 'unassign_intern',
+      targetId: asg.assignment_id,
+      targetName: asg.intern_name,
+      mentorName,
+      submitting: false,
+    });
+  };
+
+  const handleExecuteConfirmAction = () => {
+    setConfirmModal((p) => ({ ...p, submitting: true }));
+
+    if (confirmModal.actionType === 'unassign_intern') {
+      setUnassigningId(confirmModal.targetId);
+      removeMentorAssignment(confirmModal.targetId)
+        .then(() => {
+          setConfirmModal({ open: false, title: '', message: '', actionType: '', targetId: null, targetName: '', mentorName: '', submitting: false });
+          showNotice('Intern Unassigned', `${confirmModal.targetName || 'Intern'} was successfully removed from ${confirmModal.mentorName || 'the mentor'}.`, 'success');
+          loadMentors(true);
+          triggerRealtimeSync();
+        })
+        .catch((err) => {
+          setConfirmModal((p) => ({ ...p, submitting: false }));
+          showNotice('Unassign Failed', err?.message || 'Could not unassign intern.', 'error');
+        })
+        .finally(() => setUnassigningId(null));
+    } else if (confirmModal.actionType === 'remove_mentor') {
+      setProcessingId(confirmModal.targetId);
+      removeMentorFromOrg(confirmModal.targetId)
+        .then(() => {
+          setConfirmModal({ open: false, title: '', message: '', actionType: '', targetId: null, targetName: '', mentorName: '', submitting: false });
+          showNotice('Mentor Removed', `${confirmModal.targetName || 'Mentor'} has been removed from your organization scope.`, 'success');
+          loadMentors(true);
+          triggerRealtimeSync();
+        })
+        .catch((err) => {
+          setConfirmModal((p) => ({ ...p, submitting: false }));
+          showNotice('Removal Failed', err?.message || 'Could not remove mentor from organization.', 'error');
+        })
+        .finally(() => setProcessingId(null));
+    }
   };
 
   const filtered = mentorsList.filter((m) =>
@@ -3051,36 +3250,44 @@ function Mentors({ onNavigate }) {
   );
 
   const totalAssignedInterns = mentorsList.reduce((acc, m) => acc + (m.assigned_interns_count || 0), 0);
+  const pendingApplicants = mentorsList.filter((m) => m.verification_status === 'Pending Verification');
+  const pendingCount = pendingApplicants.length;
 
   return (
     <>
       <SectionHeader
         eyebrow="Delivery team"
-        title="Mentor Directory"
-        description="Mentors available within your organization and internship scope. View profiles and manage mentor-to-intern assignments."
+        title="Mentor Directory & Access Control"
+        description="Manage organization mentors, verify applicant registrations, assign mentees, and monitor team working time in real-time."
         actions={
-          <button className="provider-quiet-button" type="button" onClick={loadMentors} disabled={isLoading}>
-            <RefreshCw size={14} /> Refresh
-          </button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button className="provider-primary-btn" type="button" onClick={() => setAddMentorModal({ open: true, tab: 'applicants', fullName: '', email: '', password: '', submitting: false, error: '', done: false })}>
+              <UserPlus size={14} /> Add / Verify Mentor {pendingCount > 0 && <span style={{ background: '#f59e0b', color: '#fff', padding: '1px 6px', borderRadius: '10px', fontSize: '0.72rem', fontWeight: 700 }}>{pendingCount}</span>}
+            </button>
+            <button className="provider-quiet-button" type="button" onClick={() => loadMentors(false)} disabled={isLoading}>
+              <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} /> Sync
+            </button>
+          </div>
         }
       />
 
       <StatStrip
         items={[
-          ['Mentors in Scope', String(mentorsList.length), 'Registered mentors'],
-          ['Active Mentors', String(mentorsList.filter((m) => (m.assigned_interns_count || 0) > 0).length), 'Currently assigned to interns'],
-          ['Mentees Supervised', String(totalAssignedInterns), 'Active mentor ↔ intern links'],
+          ['Registered Mentors', String(mentorsList.length), 'In organization scope'],
+          ['Pending Verification', String(pendingCount), 'Awaiting your approval'],
+          ['Verified & Active', String(mentorsList.length - pendingCount), 'Access granted'],
+          ['Mentees Supervised', String(totalAssignedInterns), 'Active intern assignments'],
         ]}
       />
 
       {error ? (
-        <ErrorPanel message={error} onRetry={loadMentors} />
+        <ErrorPanel message={error} onRetry={() => loadMentors(false)} />
       ) : isLoading ? (
         <LoadingPanel label="Loading mentor directory…" />
       ) : mentorsList.length === 0 ? (
         <EmptyPanel
-          title="No mentors found"
-          message="No mentors are currently registered under your organization. Mentors will appear here once they sign up with your organization name or are assigned to your internships."
+          title="No mentors registered yet"
+          message="No individuals have registered as mentors under your organization name yet. When mentors sign up on InternFlow with your organization name, they will appear here for your verification and approval."
         />
       ) : (
         <>
@@ -3091,68 +3298,487 @@ function Mentors({ onNavigate }) {
             </div>
           </div>
 
-          <div className="provider-automation-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
-            {filtered.map((mentor) => (
-              <article className="provider-automation-card" key={mentor.id} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', background: '#fff', borderRadius: '12px', border: '1px solid var(--provider-border, #e2e8f0)', padding: '20px' }}>
-                <div>
-                  <div className="provider-automation-card-top" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <span className="provider-automation-icon"><Users size={18} /></span>
-                    <StatusPill tone={mentor.assigned_interns_count > 0 ? 'info' : 'success'}>
-                      {mentor.status || (mentor.assigned_interns_count > 0 ? `${mentor.assigned_interns_count} active` : 'Available')}
-                    </StatusPill>
-                  </div>
-                  <h2 style={{ margin: '0 0 4px', fontSize: '1.15rem', fontWeight: 700, color: 'var(--provider-text, #0f172a)' }}>{mentor.full_name}</h2>
-                  <p style={{ margin: '0 0 8px', fontSize: '0.85rem', color: 'var(--provider-muted, #64748b)' }}>{mentor.email}</p>
-                  
-                  {mentor.organization && (
-                    <p style={{ margin: '0 0 12px', fontSize: '0.8rem', color: 'var(--provider-muted, #64748b)' }}>
-                      <strong>Org:</strong> {mentor.organization}
-                    </p>
-                  )}
+          <div className="provider-automation-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
+            {filtered.map((mentor) => {
+              const isApproved = mentor.verification_status === 'Verified';
+              const workingTimeStr = getWorkingTime(mentor.created_at);
 
-                  <div style={{ background: 'var(--provider-surface, #f8fafc)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--provider-border, #e2e8f0)', marginBottom: '16px' }}>
-                    <small style={{ textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, fontSize: '0.7rem', color: 'var(--provider-muted, #64748b)', display: 'block', marginBottom: '4px' }}>
-                      Assigned Interns ({mentor.assigned_interns_count || 0})
-                    </small>
-                    {mentor.assigned_interns && mentor.assigned_interns.length > 0 ? (
-                      <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '0.84rem', color: 'var(--provider-text, #0f172a)' }}>
-                        {mentor.assigned_interns.map((asg) => (
-                          <li key={asg.assignment_id || asg.intern_id}>
-                            <strong>{asg.intern_name}</strong> {asg.internship_title ? `— ${asg.internship_title}` : ''}
-                          </li>
-                        ))}
-                      </ul>
+              return (
+                <article className="provider-automation-card" key={mentor.id} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', background: '#fff', borderRadius: '12px', border: isApproved ? '1px solid var(--provider-border, #e2e8f0)' : '2px solid #f59e0b', padding: '20px' }}>
+                  <div>
+                    <div className="provider-automation-card-top" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <span className="provider-automation-icon"><Users size={18} /></span>
+                      <StatusPill tone={isApproved ? 'success' : 'warning'}>
+                        {isApproved ? 'Verified Mentor' : 'Pending Verification'}
+                      </StatusPill>
+                    </div>
+                    <h2 style={{ margin: '0 0 4px', fontSize: '1.15rem', fontWeight: 700, color: 'var(--provider-text, #0f172a)' }}>{mentor.full_name}</h2>
+                    <p style={{ margin: '0 0 6px', fontSize: '0.85rem', color: 'var(--provider-muted, #64748b)' }}>{mentor.email}</p>
+                    
+                    {mentor.organization && (
+                      <p style={{ margin: '0 0 6px', fontSize: '0.8rem', color: 'var(--provider-muted, #64748b)' }}>
+                        <strong>Org:</strong> {mentor.organization}
+                      </p>
+                    )}
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '4px 0 12px', fontSize: '0.82rem', color: 'var(--provider-muted, #64748b)', background: '#f8fafc', padding: '6px 10px', borderRadius: '6px', border: '1px solid #f1f5f9' }}>
+                      <Clock size={14} style={{ color: '#3b82f6' }} />
+                      <span>Working time: <strong style={{ color: '#0f172a' }}>{workingTimeStr}</strong></span>
+                    </div>
+
+                    {!isApproved && (
+                      <div className="provider-ai-callout" style={{ background: '#fffbeb', border: '1px solid #fef3c7', color: '#92400e', marginBottom: '14px', fontSize: '0.82rem' }}>
+                        ⚠ This mentor registered for your organization and is currently blocked from accessing the Mentor Workspace until you verify their account.
+                      </div>
+                    )}
+
+                    <div style={{ background: 'var(--provider-surface, #f8fafc)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--provider-border, #e2e8f0)', marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <small style={{ textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700, fontSize: '0.7rem', color: 'var(--provider-muted, #64748b)' }}>
+                          Assigned Mentees ({mentor.assigned_interns_count || 0})
+                        </small>
+                      </div>
+                      {mentor.assigned_interns && mentor.assigned_interns.length > 0 ? (
+                        <ul style={{ margin: 0, paddingLeft: '0', listStyle: 'none', display: 'grid', gap: '6px' }}>
+                          {mentor.assigned_interns.map((asg) => (
+                            <li key={asg.assignment_id || asg.intern_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.82rem', background: '#fff', padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                              <div style={{ flex: 1, paddingRight: '8px' }}>
+                                <strong>{asg.intern_name}</strong>
+                                {asg.internship_title && <span style={{ color: '#64748b', fontSize: '0.75rem', display: 'block' }}>{asg.internship_title}</span>}
+                              </div>
+                              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                <button
+                                  className="provider-quiet-button"
+                                  type="button"
+                                  style={{ padding: '2px 6px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#2563eb' }}
+                                  onClick={() => {
+                                    try { sessionStorage.setItem('internflow_selected_mentee', String(asg.intern_id)); } catch { /* private mode */ }
+                                    onNavigate('/provider-intern-details');
+                                  }}
+                                  title="View Intern Profile"
+                                >
+                                  <Eye size={12} /> Profile
+                                </button>
+                                {asg.assignment_id && (
+                                  <button
+                                    className="provider-quiet-button"
+                                    type="button"
+                                    style={{ color: '#dc2626', padding: '2px 6px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                    disabled={unassigningId === asg.assignment_id}
+                                    onClick={() => handleRequestUnassign(asg, mentor.full_name)}
+                                    title="Remove mentor assignment"
+                                  >
+                                    <UserMinus size={12} /> {unassigningId === asg.assignment_id ? 'Unassigning…' : 'Unassign'}
+                                  </button>
+                                )}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span style={{ fontSize: '0.82rem', color: 'var(--provider-muted, #94a3b8)', fontStyle: 'italic' }}>No interns currently assigned</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+                    {!isApproved ? (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="provider-primary-btn"
+                          type="button"
+                          style={{ flex: 2, justifyContent: 'center', backgroundColor: '#059669' }}
+                          disabled={processingId === mentor.id}
+                          onClick={() => handleApprove(mentor.id, mentor.full_name)}
+                        >
+                          <CheckCircle2 size={15} /> {processingId === mentor.id ? 'Approving…' : 'Verify & Grant Access'}
+                        </button>
+                        <button
+                          className="provider-quiet-button"
+                          type="button"
+                          style={{ color: '#dc2626', padding: '6px 10px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          disabled={processingId === mentor.id}
+                          onClick={() => handleRequestRemoveFromOrg(mentor.id, mentor.full_name)}
+                          title="Remove mentor from organization"
+                        >
+                          <Trash2 size={14} /> Remove
+                        </button>
+                      </div>
                     ) : (
-                      <span style={{ fontSize: '0.82rem', color: 'var(--provider-muted, #94a3b8)', fontStyle: 'italic' }}>No interns currently assigned</span>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <button
+                          className="provider-quiet-button"
+                          type="button"
+                          style={{ justifyContent: 'center' }}
+                          onClick={() => {
+                            try { sessionStorage.setItem('internflow_selected_mentor', String(mentor.id)); } catch { /* private mode */ }
+                            onNavigate('/provider-mentor-details');
+                          }}
+                        >
+                          View Profile
+                        </button>
+                        <button
+                          className="provider-primary-btn"
+                          type="button"
+                          style={{ justifyContent: 'center', fontSize: '0.82rem', padding: '6px 10px' }}
+                          onClick={() => handleOpenAssignModal(mentor)}
+                        >
+                          <UserPlus size={14} /> Assign Intern
+                        </button>
+                        <button
+                          className="provider-quiet-button"
+                          type="button"
+                          style={{ color: '#d97706', fontSize: '0.8rem', justifyContent: 'center' }}
+                          disabled={processingId === mentor.id}
+                          onClick={() => handleRevoke(mentor.id, mentor.full_name)}
+                          title="Revoke mentor workspace access"
+                        >
+                          Revoke Access
+                        </button>
+                        <button
+                          className="provider-quiet-button"
+                          type="button"
+                          style={{ color: '#dc2626', fontSize: '0.8rem', justifyContent: 'center' }}
+                          disabled={processingId === mentor.id}
+                          onClick={() => handleRequestRemoveFromOrg(mentor.id, mentor.full_name)}
+                          title="Remove mentor from organization"
+                        >
+                          <Trash2 size={13} /> Remove Org
+                        </button>
+                      </div>
                     )}
                   </div>
-                </div>
+                </article>
+              );
+            })}
+          </div>
 
-                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+          {/* Notice Pop-up Modal */}
+          {noticeModal.open && (
+            <div
+              className="provider-modal-backdrop animate-fade-in"
+              onClick={() => setNoticeModal((p) => ({ ...p, open: false }))}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                backdropFilter: 'blur(4px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1100,
+                padding: '20px',
+              }}
+            >
+              <div
+                className="provider-modal-card animate-scale-in"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: '#ffffff',
+                  borderRadius: '16px',
+                  maxWidth: '420px',
+                  width: '100%',
+                  padding: '28px 24px',
+                  boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+                  border: '1px solid var(--provider-border, #e2e8f0)',
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '52px', height: '52px', borderRadius: '50%', backgroundColor: noticeModal.type === 'error' ? '#fef2f2' : '#ecfdf5', color: noticeModal.type === 'error' ? '#dc2626' : '#059669', marginBottom: '14px' }}>
+                  {noticeModal.type === 'error' ? <AlertTriangle size={28} /> : <CheckCircle2 size={28} />}
+                </div>
+                <h3 style={{ margin: '0 0 8px', fontSize: '1.2rem', fontWeight: 700, color: '#0f172a' }}>{noticeModal.title}</h3>
+                <p style={{ margin: '0 0 20px', fontSize: '0.9rem', color: '#64748b', lineHeight: 1.5 }}>{noticeModal.message}</p>
+                <button
+                  className="provider-primary-btn"
+                  type="button"
+                  style={{ width: '100%', justifyContent: 'center', backgroundColor: noticeModal.type === 'error' ? '#0f172a' : '#2563eb' }}
+                  onClick={() => setNoticeModal((p) => ({ ...p, open: false }))}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Confirmation Pop-up Modal */}
+          {confirmModal.open && (
+            <div
+              className="provider-modal-backdrop animate-fade-in"
+              onClick={() => setConfirmModal((p) => ({ ...p, open: false }))}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                backdropFilter: 'blur(4px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1050,
+                padding: '20px',
+              }}
+            >
+              <div
+                className="provider-modal-card animate-scale-in"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: '#ffffff',
+                  borderRadius: '16px',
+                  maxWidth: '460px',
+                  width: '100%',
+                  padding: '24px',
+                  boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+                  border: '1px solid var(--provider-border, #e2e8f0)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <AlertTriangle size={20} style={{ color: '#d97706' }} /> {confirmModal.title}
+                  </h3>
+                  <button type="button" onClick={() => setConfirmModal((p) => ({ ...p, open: false }))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}>
+                    <X size={20} />
+                  </button>
+                </div>
+                <p style={{ margin: '0 0 20px', fontSize: '0.9rem', color: '#475569', lineHeight: 1.5 }}>
+                  {confirmModal.message}
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                   <button
                     className="provider-quiet-button"
                     type="button"
-                    style={{ flex: 1, justifyContent: 'center' }}
-                    onClick={() => {
-                      try { sessionStorage.setItem('internflow_selected_mentor', String(mentor.id)); } catch { /* private mode */ }
-                      onNavigate('/provider-mentor-details');
-                    }}
+                    disabled={confirmModal.submitting}
+                    onClick={() => setConfirmModal((p) => ({ ...p, open: false }))}
                   >
-                    View Profile
+                    Cancel
                   </button>
                   <button
                     className="provider-primary-btn"
                     type="button"
-                    style={{ flex: 1, justifyContent: 'center', fontSize: '0.82rem', padding: '6px 10px' }}
-                    onClick={() => handleOpenAssignModal(mentor)}
+                    style={{ backgroundColor: '#dc2626' }}
+                    disabled={confirmModal.submitting}
+                    onClick={handleExecuteConfirmAction}
                   >
-                    <UserPlus size={14} /> Assign Intern
+                    {confirmModal.submitting ? 'Processing…' : 'Confirm & Proceed'}
                   </button>
                 </div>
-              </article>
-            ))}
-          </div>
+              </div>
+            </div>
+          )}
 
+          {/* Add Mentor Modal */}
+          {addMentorModal.open && (
+            <div
+              className="provider-modal-backdrop"
+              onClick={() => setAddMentorModal((p) => ({ ...p, open: false }))}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                backdropFilter: 'blur(4px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1000,
+                padding: '20px',
+              }}
+            >
+              <div
+                className="provider-modal-card animate-scale-in"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  background: '#ffffff',
+                  borderRadius: '16px',
+                  maxWidth: '560px',
+                  width: '100%',
+                  padding: '24px',
+                  boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+                  border: '1px solid var(--provider-border, #e2e8f0)',
+                  maxHeight: '90vh',
+                  overflowY: 'auto',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Add & Verify Mentors</h3>
+                    <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: '#64748b' }}>Review applicants who applied for your organization or create accounts manually.</p>
+                  </div>
+                  <button type="button" onClick={() => setAddMentorModal((p) => ({ ...p, open: false }))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}>
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', marginBottom: '16px', gap: '12px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setAddMentorModal((p) => ({ ...p, tab: 'applicants' }))}
+                    style={{
+                      padding: '8px 14px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: addMentorModal.tab === 'applicants' ? '2px solid #2563eb' : '2px solid transparent',
+                      fontWeight: addMentorModal.tab === 'applicants' ? 700 : 500,
+                      color: addMentorModal.tab === 'applicants' ? '#2563eb' : '#64748b',
+                      cursor: 'pointer',
+                      fontSize: '0.88rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <Users size={16} /> Applied Mentors {pendingApplicants.length > 0 && <span style={{ background: '#f59e0b', color: '#fff', borderRadius: '10px', padding: '1px 6px', fontSize: '0.72rem' }}>{pendingApplicants.length}</span>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddMentorModal((p) => ({ ...p, tab: 'create' }))}
+                    style={{
+                      padding: '8px 14px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: addMentorModal.tab === 'create' ? '2px solid #2563eb' : '2px solid transparent',
+                      fontWeight: addMentorModal.tab === 'create' ? 700 : 500,
+                      color: addMentorModal.tab === 'create' ? '#2563eb' : '#64748b',
+                      cursor: 'pointer',
+                      fontSize: '0.88rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <UserPlus size={16} /> Direct Add / Create Account
+                  </button>
+                </div>
+
+                {addMentorModal.tab === 'applicants' ? (
+                  <div>
+                    {pendingApplicants.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '24px 12px', background: '#f8fafc', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
+                        <Users size={32} style={{ color: '#94a3b8', marginBottom: '8px' }} />
+                        <h4 style={{ margin: '0 0 4px', color: '#334155' }}>No Pending Applications</h4>
+                        <p style={{ margin: '0 0 12px', fontSize: '0.85rem', color: '#64748b' }}>
+                          There are currently no mentors waiting for organization verification.
+                        </p>
+                        <button className="provider-quiet-button" type="button" onClick={() => setAddMentorModal((p) => ({ ...p, tab: 'create' }))}>
+                          Switch to Direct Add Form
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'grid', gap: '12px' }}>
+                        {pendingApplicants.map((app) => (
+                          <div key={app.id} style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '14px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <div>
+                                <h4 style={{ margin: '0 0 2px', fontSize: '1rem', fontWeight: 700, color: '#92400e' }}>{app.full_name}</h4>
+                                <p style={{ margin: '0 0 6px', fontSize: '0.83rem', color: '#78350f' }}>{app.email}</p>
+                                {app.organization && <span style={{ fontSize: '0.78rem', color: '#b45309', display: 'block' }}><strong>Organization:</strong> {app.organization}</span>}
+                                <span style={{ fontSize: '0.78rem', color: '#b45309', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
+                                  <Clock size={12} /> Applied: {getWorkingTime(app.created_at)}
+                                </span>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                              <button
+                                className="provider-primary-btn"
+                                type="button"
+                                style={{ flex: 1, justifyContent: 'center', backgroundColor: '#059669', fontSize: '0.82rem' }}
+                                disabled={processingId === app.id}
+                                onClick={() => {
+                                  handleApprove(app.id, app.full_name);
+                                }}
+                              >
+                                <UserCheck size={14} /> {processingId === app.id ? 'Approving…' : 'Approve & Add to Roster'}
+                              </button>
+                              <button
+                                className="provider-quiet-button"
+                                type="button"
+                                style={{ color: '#dc2626', fontSize: '0.82rem', padding: '6px 12px' }}
+                                disabled={processingId === app.id}
+                                onClick={() => handleRequestRemoveFromOrg(app.id, app.full_name)}
+                              >
+                                <UserX size={14} /> Reject
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : addMentorModal.done ? (
+                  <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', color: '#059669', fontWeight: 700, marginBottom: '8px' }}>
+                      <CheckCircle2 size={22} /> Mentor Account Created!
+                    </div>
+                    <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '16px' }}>
+                      <strong>{addMentorModal.fullName}</strong> has been added to your organization as a mentor. They can now log in using <strong>{addMentorModal.email}</strong>.
+                    </p>
+                    <button className="provider-primary-btn" type="button" onClick={() => setAddMentorModal((p) => ({ ...p, open: false }))}>
+                      Done
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'grid', gap: '12px', marginBottom: '16px' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                        Full Name *
+                        <input
+                          className="provider-select"
+                          style={{ width: '100%', marginTop: '4px' }}
+                          value={addMentorModal.fullName}
+                          onChange={(e) => setAddMentorModal((p) => ({ ...p, fullName: e.target.value, error: '' }))}
+                          placeholder="e.g. Dr. Sarah Jenkins"
+                        />
+                      </label>
+
+                      <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                        Work Email Address *
+                        <input
+                          type="email"
+                          className="provider-select"
+                          style={{ width: '100%', marginTop: '4px' }}
+                          value={addMentorModal.email}
+                          onChange={(e) => setAddMentorModal((p) => ({ ...p, email: e.target.value, error: '' }))}
+                          placeholder="e.g. sarah.jenkins@company.com"
+                        />
+                      </label>
+
+                      <label style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                        Initial Password *
+                        <input
+                          type="password"
+                          className="provider-select"
+                          style={{ width: '100%', marginTop: '4px' }}
+                          value={addMentorModal.password}
+                          onChange={(e) => setAddMentorModal((p) => ({ ...p, password: e.target.value, error: '' }))}
+                          placeholder="At least 8 characters"
+                        />
+                      </label>
+                    </div>
+
+                    {addMentorModal.error && (
+                      <div className="provider-ai-callout" role="alert" style={{ marginBottom: '12px' }}>
+                        {addMentorModal.error}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+                      <button className="provider-quiet-button" type="button" onClick={() => setAddMentorModal((p) => ({ ...p, open: false }))}>
+                        Cancel
+                      </button>
+                      <button
+                        className="provider-primary-btn"
+                        type="button"
+                        disabled={addMentorModal.submitting || !addMentorModal.fullName || !addMentorModal.email || !addMentorModal.password}
+                        onClick={handleExecuteCreateMentor}
+                      >
+                        <UserPlus size={15} /> {addMentorModal.submitting ? 'Creating…' : 'Create Mentor Account'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Assign Modal */}
           {selectedMentor && (
             <div
               className="provider-modal-backdrop"
