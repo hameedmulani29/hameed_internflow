@@ -51,6 +51,47 @@ export function createMentorAssignment({ mentorId, internId, internshipId }) {
   });
 }
 
+export function removeMentorAssignment(assignmentId) {
+  return request(`/mentor/assignments/${Number(assignmentId)}`, {
+    method: 'DELETE',
+    providerRole: true,
+  });
+}
+
+export function approveMentorAccount(mentorId) {
+  return request(`/mentor/${Number(mentorId)}/approve`, {
+    method: 'PATCH',
+    providerRole: true,
+  });
+}
+
+export function revokeMentorAccount(mentorId) {
+  return request(`/mentor/${Number(mentorId)}/revoke`, {
+    method: 'PATCH',
+    providerRole: true,
+  });
+}
+
+export function removeMentorFromOrg(mentorId) {
+  return request(`/mentor/${Number(mentorId)}`, {
+    method: 'DELETE',
+    providerRole: true,
+  });
+}
+
+
+export function addMentor({ fullName, email, password }) {
+  return request('/mentor/add', {
+    method: 'POST',
+    providerRole: true,
+    body: JSON.stringify({
+      full_name: fullName,
+      email,
+      password,
+    }),
+  });
+}
+
 // ============ Mentor: projects ============
 
 export function fetchMentorProjects() {
