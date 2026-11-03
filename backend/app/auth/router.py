@@ -33,21 +33,27 @@ def register(payload: RegisterRequest):
             raise HTTPException(status_code=422, detail='Mentor email domain is not allowed by the configured policy.')
     with get_db() as db:
         try:
-            is_approved = 1
+            # Mentors require provider verification before access is granted (is_approved=0, trust_level='pending').
+            is_approved = 0 if payload.role == 'mentor' else 1
             is_verified = 1
+            trust_level = 'pending' if payload.role == 'mentor' else 'approved'
             cursor = db.execute(
                 'INSERT INTO users (full_name, email, password_hash, role, organization, is_active, is_verified, is_approved, trust_level, requires_2fa) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id',
-                (payload.full_name.strip(), email_lower, hash_password(payload.password), payload.role, payload.organization, 1, is_verified, is_approved, 'approved', 0),
+                (payload.full_name.strip(), email_lower, hash_password(payload.password), payload.role, payload.organization, 1, is_verified, is_approved, trust_level, 0),
             )
             ret = cursor.fetchone()
-            user_id = ret["id"] if isinstance(ret, dict) or hasattr(ret, "__getitem__") and "id" in ret else ret[0]
+            user_id = ret["id"] if isinstance(ret, dict) or (hasattr(ret, "__getitem__") and "id" in ret) else ret[0]
             db.commit()
         except Exception as error:
             if is_unique_violation(error):
                 raise HTTPException(status_code=409, detail='An account with this email already exists.') from error
             raise
         if payload.role == 'mentor':
-            seed_mentor_demo_data(db, user_id)
+            return {
+                'user': {'id': user_id, 'full_name': payload.full_name, 'email': payload.email, 'role': payload.role, 'organization': payload.organization},
+                'message': 'Account created! Your mentor account is pending provider verification before access to the mentor workspace is granted.',
+                'pending_verification': True,
+            }
     return {'user': {'id': user_id, 'full_name': payload.full_name, 'email': payload.email, 'role': payload.role, 'organization': payload.organization}, 'token': create_token(user_id, payload.role)}
 
 
@@ -63,6 +69,8 @@ def login(payload: LoginRequest):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Your account is not active.')
         if user['is_verified'] != 1:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Your account email must be verified before privileged access.')
+        if user['role'] == 'mentor' and (user['is_approved'] != 1 or (user['trust_level'] or '').lower() not in {'approved', 'active'}):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Your mentor account is pending provider verification. Access to the mentor workspace is not granted until your organization administrator verifies your account.')
         if user['is_approved'] != 1 or (user['trust_level'] or '').lower() not in {'approved', 'active'}:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Your account is not approved for privileged access.')
         if user['requires_2fa'] == 1:
