@@ -9,21 +9,14 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 export async function request(path, options = {}) {
   let role = null;
-  if (options.providerRole) {
-    // Explicit override for provider calls that live under /api/mentor/*
-    // (e.g. assignments) — the path-based inference below would otherwise
-    // route them to the mentor session.
+  if (options.providerRole || path.startsWith('/provider')) {
+    // Explicit override or path-based route for provider calls
     role = 'provider';
   } else if ((path === '/interns' || path.startsWith('/interns/')) || path.startsWith('/applications/mine')) {
-    // Exact match on the interns resource only — startsWith('/interns') also
-    // matched '/internships' and wrongly attached the intern session to
-    // provider internship requests.
+    // Exact match on the interns resource only
     role = 'intern';
   } else if (path === '/mentor-feedback' || path.startsWith('/mentor-feedback/')) {
     // Shared resource used by BOTH roles (intern submits, mentor receives).
-    // Resolve the caller from the current location BEFORE the generic
-    // startsWith('/mentor') check, which would otherwise attach the mentor
-    // session to intern submissions and fail with 401.
     const callerPath = typeof window !== 'undefined' ? window.location.pathname || '' : '';
     role = callerPath.startsWith('/mentor') && !callerPath.startsWith('/mentor-feedback') ? 'mentor' : 'intern';
   } else if (path.startsWith('/mentor')) {
@@ -38,7 +31,8 @@ export async function request(path, options = {}) {
   }
 
   const session = getSession(role);
-  const token = session?.token;
+  // Ensure token matches the target role to avoid sending wrong role's token to restricted endpoints
+  const token = (role && session?.user?.role && session.user.role !== role) ? null : session?.token;
 
   const fetchOptions = { ...options };
   delete fetchOptions.providerRole; // internal routing hint — never sent to the server
@@ -56,8 +50,10 @@ export async function request(path, options = {}) {
     // so protected pages for this role re-render to login without affecting other roles.
     if (response.status === 401 && token) {
       const clearRole = role || session?.user?.role || undefined;
-      try { clearSession(clearRole); } catch { /* storage unavailable */ }
-      try { window.dispatchEvent(new Event('internflow_session_changed')); } catch { /* non-DOM */ }
+      if (clearRole) {
+        try { clearSession(clearRole); } catch { /* storage unavailable */ }
+        try { window.dispatchEvent(new Event('internflow_session_changed')); } catch { /* non-DOM */ }
+      }
     }
     throw new Error(body.detail || 'The request could not be completed.');
   }
@@ -86,14 +82,15 @@ export function getSession(preferredRole = null) {
       return null;
     }
 
-    // Un-scoped call outside any role path: return role-specific sessions first
+    // Un-scoped call outside any role path: check primary session first if present
+    const primarySession = JSON.parse(localStorage.getItem('internflow_session') || 'null');
+    if (primarySession?.token) return primarySession;
+
+    // Return role-specific sessions if primary session is absent
     for (const role of ['provider', 'mentor', 'intern']) {
       const s = JSON.parse(localStorage.getItem(`internflow_session_${role}`) || 'null');
       if (s?.token && s?.user?.role === role) return s;
     }
-
-    const primarySession = JSON.parse(localStorage.getItem('internflow_session') || 'null');
-    if (primarySession?.token) return primarySession;
 
     return null;
   } catch {
@@ -103,24 +100,33 @@ export function getSession(preferredRole = null) {
 
 export function clearSession(role = null) {
   let targetRole = role;
-  if (!targetRole) {
+  if (!targetRole || targetRole === 'auto') {
     const path = typeof window !== 'undefined' ? window.location.pathname || '' : '';
     if (path.startsWith('/provider')) targetRole = 'provider';
     else if (path.startsWith('/intern') || path === '/mentor-feedback') targetRole = 'intern';
     else if (path.startsWith('/mentor')) targetRole = 'mentor';
+    else targetRole = null;
   }
 
-  if (targetRole) {
+  if (targetRole === 'all') {
+    // Explicit global logout across all roles
+    localStorage.removeItem('internflow_session_provider');
+    localStorage.removeItem('internflow_session_mentor');
+    localStorage.removeItem('internflow_session_intern');
+    localStorage.removeItem('internflow_session');
+  } else if (targetRole) {
+    // Safely remove session ONLY for the specified target role
     localStorage.removeItem(`internflow_session_${targetRole}`);
     const primary = JSON.parse(localStorage.getItem('internflow_session') || 'null');
     if (primary?.user?.role === targetRole) {
       localStorage.removeItem('internflow_session');
     }
   } else {
-    // Explicit global logout without role context
-    localStorage.removeItem('internflow_session_provider');
-    localStorage.removeItem('internflow_session_mentor');
-    localStorage.removeItem('internflow_session_intern');
+    // Fallback if no specific role could be determined: clear primary session only
+    const primary = JSON.parse(localStorage.getItem('internflow_session') || 'null');
+    if (primary?.user?.role) {
+      localStorage.removeItem(`internflow_session_${primary.user.role}`);
+    }
     localStorage.removeItem('internflow_session');
   }
   window.dispatchEvent(new Event('internflow_session_changed'));
