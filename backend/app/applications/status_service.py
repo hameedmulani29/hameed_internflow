@@ -43,12 +43,7 @@ def transition_application_status(db, application_id: int, provider_id: int, new
             "SELECT id, mentor_id, internship_id FROM mentor_assignments WHERE intern_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1",
             (candidate_id,)
         ).fetchone()
-        if not existing:
-            db.execute(
-                "INSERT INTO mentor_assignments (mentor_id, intern_id, internship_id, status) VALUES (NULL, ?, ?, 'active')",
-                (candidate_id, internship_id)
-            )
-        elif not existing['internship_id']:
+        if existing and not existing['internship_id']:
             db.execute(
                 "UPDATE mentor_assignments SET internship_id = ? WHERE id = ?",
                 (internship_id, existing['id'])
