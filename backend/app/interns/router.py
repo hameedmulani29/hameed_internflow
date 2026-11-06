@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status, BackgroundTasks
 from pydantic import BaseModel, Field
 
 from app.core.permissions import require_roles
@@ -7,6 +7,7 @@ from app.db import get_db
 from app.services.activity_service import record_and_broadcast_activity
 from app.skills.router import get_or_create_skill
 from app.websocket.manager import intern_manager
+from app.services.webhook_service import emit_task_submitted_event
 
 router = APIRouter(prefix='/api/interns', tags=['intern'])
 
@@ -40,6 +41,13 @@ async def intern_websocket(websocket: WebSocket, token: str | None = Query(None)
 class InternSkillsInput(BaseModel):
     skills: list[str] = Field(default_factory=list, max_length=50)
 
+
+
+class InternBlockerInput(BaseModel):
+    task_id: int | None = None
+    project_id: int | None = None
+    blocker_type: str = Field(default='technical', pattern='^(technical|access|dependency|requirements|other)$')
+    description: str = Field(..., min_length=5, max_length=2000)
 
 class InternTaskSubmissionInput(BaseModel):
     content: str | None = Field(default=None, min_length=10, max_length=4000)
@@ -418,7 +426,7 @@ def list_tasks(
 
 @router.post('/tasks/{task_id}/submit', status_code=201)
 @router.post('/tasks/{task_id}/submit/', status_code=201)
-async def submit_task(task_id: int, payload: InternTaskSubmissionInput, token=Depends(require_roles('intern'))):
+async def submit_task(task_id: int, payload: InternTaskSubmissionInput, background_tasks: BackgroundTasks, token=Depends(require_roles('intern'))):
     intern = int(token['sub'])
     content = _normalize_submission_text(payload)
     with get_db() as db:
@@ -453,6 +461,22 @@ async def submit_task(task_id: int, payload: InternTaskSubmissionInput, token=De
                 )
                 db.commit()
                 row = db.execute('SELECT * FROM task_submissions WHERE id = ?', (existing['id'],)).fetchone()
+                intern_u = db.execute('SELECT full_name, email FROM users WHERE id = ?', (intern,)).fetchone()
+                mentor_u = db.execute('SELECT full_name, email FROM users WHERE id = ?', (task['mentor_id'],)).fetchone()
+                background_tasks.add_task(
+                    emit_task_submitted_event,
+                    submission_id=existing['id'],
+                    task_id=task_id,
+                    intern_id=intern,
+                    intern_name=intern_u['full_name'] if intern_u else f"Intern #{intern}",
+                    intern_email=intern_u['email'] if intern_u else "",
+                    mentor_id=task['mentor_id'],
+                    mentor_name=mentor_u['full_name'] if mentor_u else f"Mentor #{task['mentor_id']}",
+                    mentor_email=mentor_u['email'] if mentor_u else "",
+                    task_title=task['title'],
+                    submitted_at=str(row['submitted_at']),
+                    submission_url="",
+                )
                 return {
                     'id': existing['id'],
                     'task_id': task_id,
@@ -483,6 +507,22 @@ async def submit_task(task_id: int, payload: InternTaskSubmissionInput, token=De
         )
         db.commit()
         submission = db.execute('SELECT * FROM task_submissions WHERE id = %s', (sub_id,)).fetchone()
+        intern_u = db.execute('SELECT full_name, email FROM users WHERE id = ?', (intern,)).fetchone()
+        mentor_u = db.execute('SELECT full_name, email FROM users WHERE id = ?', (task['mentor_id'],)).fetchone()
+        background_tasks.add_task(
+            emit_task_submitted_event,
+            submission_id=sub_id,
+            task_id=task_id,
+            intern_id=intern,
+            intern_name=intern_u['full_name'] if intern_u else f"Intern #{intern}",
+            intern_email=intern_u['email'] if intern_u else "",
+            mentor_id=task['mentor_id'],
+            mentor_name=mentor_u['full_name'] if mentor_u else f"Mentor #{task['mentor_id']}",
+            mentor_email=mentor_u['email'] if mentor_u else "",
+            task_title=task['title'],
+            submitted_at=str(submission['submitted_at']),
+            submission_url="",
+        )
     return {
         'id': submission['id'],
         'task_id': task_id,
@@ -537,3 +577,93 @@ async def update_task_status(task_id: int, payload: InternTaskStatusInput, token
         'status': updated['status'],
         'updated_at': updated['created_at'],
     }
+
+@router.post('/blockers', status_code=status.HTTP_201_CREATED)
+async def report_blocker(payload: InternBlockerInput, token=Depends(require_roles('intern'))):
+    intern = int(token['sub'])
+    task_id = payload.task_id
+    project_id = payload.project_id
+    
+    with get_db() as db:
+        mentor_id = None
+        if task_id:
+            task = db.execute('SELECT * FROM mentor_tasks WHERE id = ? AND intern_id = ?', (task_id, intern)).fetchone()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found for this intern.")
+            mentor_id = task['mentor_id']
+            if not project_id:
+                project_id = task['project_id']
+        
+        if not mentor_id and project_id:
+            proj = db.execute('SELECT mentor_id FROM projects WHERE id = ?', (project_id,)).fetchone()
+            if proj:
+                mentor_id = proj['mentor_id']
+
+        if not mentor_id:
+            assign = db.execute(
+                "SELECT mentor_id, internship_id FROM mentor_assignments WHERE intern_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+                (intern,)
+            ).fetchone()
+            if assign:
+                mentor_id = assign['mentor_id']
+                if not project_id and assign['internship_id']:
+                    proj = db.execute("SELECT id FROM projects WHERE internship_id = ? ORDER BY id DESC LIMIT 1", (assign['internship_id'],)).fetchone()
+                    if proj:
+                        project_id = proj['id']
+
+        if not mentor_id:
+            raise HTTPException(status_code=400, detail="Cannot determine assigned mentor for this blocker.")
+
+        cursor = db.execute(
+            '''INSERT INTO blockers (intern_id, mentor_id, project_id, task_id, blocker_type, description, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP)''',
+            (intern, mentor_id, project_id, task_id, payload.blocker_type, payload.description.strip())
+        )
+        blocker_id = cursor.lastrowid
+        db.commit()
+
+        await record_and_broadcast_activity(
+            db,
+            actor_id=intern,
+            actor_role='intern',
+            event_type='blocker.created',
+            mentor_id=mentor_id,
+            title='Blocker Reported',
+            description=f'Intern reported blocker: {payload.description[:60]}',
+            intern_id=intern,
+            project_id=project_id,
+            task_id=task_id,
+            metadata={'blocker_id': blocker_id, 'blocker_type': payload.blocker_type},
+        )
+        db.commit()
+
+        row = db.execute(
+            '''SELECT b.*, t.title AS task_title, p.title AS project_title, u.full_name AS intern_name
+               FROM blockers b
+               LEFT JOIN mentor_tasks t ON t.id = b.task_id
+               LEFT JOIN projects p ON p.id = b.project_id
+               LEFT JOIN users u ON u.id = b.intern_id
+               WHERE b.id = ?''',
+            (blocker_id,)
+        ).fetchone()
+
+    return dict(row)
+
+
+@router.get('/me/blockers')
+@router.get('/blockers')
+def list_my_blockers(token=Depends(require_roles('intern'))):
+    intern = int(token['sub'])
+    with get_db() as db:
+        rows = db.execute(
+            '''SELECT b.*, t.title AS task_title, p.title AS project_title, m.full_name AS mentor_name
+               FROM blockers b
+               LEFT JOIN mentor_tasks t ON t.id = b.task_id
+               LEFT JOIN projects p ON p.id = b.project_id
+               LEFT JOIN users m ON m.id = b.mentor_id
+               WHERE b.intern_id = ?
+               ORDER BY b.created_at DESC''',
+            (intern,)
+        ).fetchall()
+    return {'items': [dict(r) for r in rows]}
+
