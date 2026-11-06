@@ -1,16 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
+  AlertOctagon,
   Calendar,
+  Check,
   CheckCircle2,
   Clock,
+  Download,
   FileCheck2,
+  FileText,
   LifeBuoy,
   Mail,
   MessageSquare,
+  Play,
   Search,
+  Send,
   Sparkles,
   Users,
+  X,
 } from 'lucide-react';
 import {
   fetchMentorEvaluations,
@@ -24,6 +31,13 @@ import {
   PROGRESS_STATES,
   progressStateLabel,
 } from '../../services/orchestrationService';
+import {
+  fetchDailyReports,
+  fetchDailyRoster,
+  fetchMentorBlockers,
+  generateDailyReport,
+  resolveMentorBlocker,
+} from '../../services/mentorshipFoundationService';
 
 /**
  * MentorMonitoringView — Daily Status & Intern Monitoring workspace.
@@ -116,6 +130,155 @@ function EvidenceList({ items }) {
   );
 }
 
+
+function DailyReportModal({ report, pastReports = [], onClose, onSelectPastReport }) {
+  const [copied, setCopied] = useState(false);
+  const metrics = report?.metrics || {};
+  const roster = report?.roster || [];
+
+  const handleCopy = () => {
+    const textToCopy = `DAILY PROGRESS REPORT — ${report.project_title || 'Project'}\nDate: ${report.report_date}\nCompletion Rate: ${metrics.completion_rate || 0}%\n\nEXECUTIVE SUMMARY:\n${report.summary || ''}\n\nDAILY ROSTER:\n` +
+      roster.map(r => `- ${r.intern_name} [${r.daily_state.toUpperCase()}] | Checked-in: ${r.checked_in_today ? 'Yes' : 'No'} | Tasks: ${r.tasks_today?.length || 0}`).join('\n');
+    navigator.clipboard?.writeText(textToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+      <div style={{ background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '850px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
+        {/* Header */}
+        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+            <FileText size={18} style={{ color: '#0284c7' }} />
+            <div>
+              <strong style={{ fontSize: '.95rem', color: '#0f172a' }}>Daily Progress &amp; Completion Report</strong>
+              <small style={{ display: 'block', fontSize: '.72rem', color: '#64748b' }}>
+                {report.project_title || 'Internship Project'} · {report.report_date} · AI Generated
+              </small>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: '#64748b' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'grid', gap: '1rem' }}>
+          {/* Metrics summary banner */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '.5rem' }}>
+            <div style={{ background: '#f8fafc', padding: '.6rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '.68rem', color: '#64748b' }}>Completion Rate</span>
+              <strong style={{ display: 'block', fontSize: '1.15rem', color: '#0284c7' }}>{metrics.completion_rate || 0}%</strong>
+            </div>
+            <div style={{ background: '#f8fafc', padding: '.6rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '.68rem', color: '#64748b' }}>Total Interns</span>
+              <strong style={{ display: 'block', fontSize: '1.15rem' }}>{metrics.total_interns || 0}</strong>
+            </div>
+            <div style={{ background: '#ecfdf5', padding: '.6rem', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+              <span style={{ fontSize: '.68rem', color: '#047857' }}>Completed</span>
+              <strong style={{ display: 'block', fontSize: '1.15rem', color: '#047857' }}>{metrics.completed_count || 0}</strong>
+            </div>
+            <div style={{ background: '#eff6ff', padding: '.6rem', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+              <span style={{ fontSize: '.68rem', color: '#1d4ed8' }}>In Progress</span>
+              <strong style={{ display: 'block', fontSize: '1.15rem', color: '#1d4ed8' }}>{metrics.in_progress_count || 0}</strong>
+            </div>
+            <div style={{ background: metrics.blocked_count ? '#fff7ed' : '#f8fafc', padding: '.6rem', borderRadius: '8px', border: '1px solid #fed7aa' }}>
+              <span style={{ fontSize: '.68rem', color: '#c2410c' }}>Blocked</span>
+              <strong style={{ display: 'block', fontSize: '1.15rem', color: metrics.blocked_count ? '#c2410c' : 'inherit' }}>{metrics.blocked_count || 0}</strong>
+            </div>
+            <div style={{ background: metrics.overdue_count ? '#fef2f2' : '#f8fafc', padding: '.6rem', borderRadius: '8px', border: '1px solid #fecaca' }}>
+              <span style={{ fontSize: '.68rem', color: '#b91c1c' }}>Overdue</span>
+              <strong style={{ display: 'block', fontSize: '1.15rem', color: metrics.overdue_count ? '#b91c1c' : 'inherit' }}>{metrics.overdue_count || 0}</strong>
+            </div>
+          </div>
+
+          {/* AI Executive Summary */}
+          <div style={{ padding: '1rem', background: 'rgba(248, 250, 252, 0.8)', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', marginBottom: '.4rem' }}>
+              <Sparkles size={14} style={{ color: '#0284c7' }} />
+              <strong style={{ fontSize: '.82rem', color: '#0f172a' }}>Executive Summary</strong>
+            </div>
+            <p style={{ margin: 0, fontSize: '.78rem', color: '#334155', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+              {report.summary}
+            </p>
+          </div>
+
+          {/* Daily Intern Roster Snapshot */}
+          <div>
+            <strong style={{ display: 'block', fontSize: '.82rem', color: '#0f172a', marginBottom: '.4rem' }}>Today&apos;s Intern Roster Breakdown</strong>
+            <div style={{ display: 'grid', gap: '.4rem' }}>
+              {roster.map((i, idx) => {
+                const stateStyle = {
+                  completed: { bg: '#ecfdf5', text: '#047857', border: '#a7f3d0', icon: '✓ Completed' },
+                  in_progress: { bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe', icon: '◐ In Progress' },
+                  blocked: { bg: '#fff7ed', text: '#c2410c', border: '#fed7aa', icon: '🛑 Blocked' },
+                  overdue: { bg: '#fef2f2', text: '#b91c1c', border: '#fecaca', icon: '⚠ Overdue' },
+                  not_started: { bg: '#f8fafc', text: '#64748b', border: '#e2e8f0', icon: '○ Not Started' },
+                }[i.daily_state] || { bg: '#f8fafc', text: '#64748b', border: '#e2e8f0', icon: i.daily_state };
+
+                return (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '.55rem .75rem', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', flexWrap: 'wrap', gap: '.5rem' }}>
+                    <div style={{ display: 'grid', gap: '2px' }}>
+                      <strong style={{ fontSize: '.82rem', color: '#0f172a' }}>{i.intern_name}</strong>
+                      <span style={{ fontSize: '.68rem', color: '#64748b' }}>
+                        {i.intern_email} · Attendance: {i.checked_in_today ? 'Checked In' : 'Not Checked In'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
+                      <span style={{ fontSize: '.68rem', color: '#475569' }}>
+                        {i.completed_tasks_count} done · {i.open_blockers_count ? `${i.open_blockers_count} blocker(s)` : '0 blockers'}
+                      </span>
+                      <span style={{ padding: '3px 8px', borderRadius: '6px', fontSize: '.68rem', fontWeight: 700, background: stateStyle.bg, color: stateStyle.text, border: `1px solid ${stateStyle.border}` }}>
+                        {stateStyle.icon}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Past reports history */}
+          {pastReports.length > 1 && (
+            <div>
+              <strong style={{ display: 'block', fontSize: '.8rem', color: '#64748b', marginBottom: '.3rem' }}>Previous Reports</strong>
+              <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
+                {pastReports.map(pr => (
+                  <button
+                    key={pr.id}
+                    type="button"
+                    onClick={() => onSelectPastReport && onSelectPastReport(pr)}
+                    style={{
+                      padding: '3px 8px', borderRadius: '6px', fontSize: '.68rem',
+                      background: pr.id === report.id ? 'rgba(2,132,199,0.1)' : '#f8fafc',
+                      border: pr.id === report.id ? '1px solid #0284c7' : '1px solid #e2e8f0',
+                      color: pr.id === report.id ? '#0284c7' : '#475569', cursor: 'pointer'
+                    }}
+                  >
+                    {pr.report_date} ({pr.completion_rate}%)
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '.8rem 1.25rem', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', borderRadius: '0 0 12px 12px' }}>
+          <button type="button" onClick={handleCopy} style={{ display: 'flex', alignItems: 'center', gap: '.3rem', padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '.74rem', fontWeight: 600, cursor: 'pointer' }}>
+            <Download size={13} />
+            {copied ? 'Copied to Clipboard!' : 'Copy Summary'}
+          </button>
+          <button type="button" onClick={onClose} style={{ padding: '6px 16px', borderRadius: '6px', border: 0, background: '#0284c7', color: '#fff', fontSize: '.74rem', fontWeight: 600, cursor: 'pointer' }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function MentorMonitoringView({ interns = [], onNavigate, refreshKey = 0 }) {
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
@@ -126,6 +289,18 @@ export default function MentorMonitoringView({ interns = [], onNavigate, refresh
   const [blockers, setBlockers] = useState({ items: [], loading: true, error: '' });
   const [weekly, setWeekly] = useState(null);
   const [evaluations, setEvaluations] = useState([]);
+
+  // Authoritative blockers state
+  const [authoritativeBlockers, setAuthoritativeBlockers] = useState([]);
+  const [resolvingBlockerId, setResolvingBlockerId] = useState(null);
+  const [resolutionNotes, setResolutionNotes] = useState('');
+  const [resolveBusy, setResolveBusy] = useState(false);
+
+  // Daily Reports & Roster state
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [activeReport, setActiveReport] = useState(null);
+  const [pastReports, setPastReports] = useState([]);
 
   /* ---------------- Selector + selection ---------------- */
 
@@ -156,6 +331,44 @@ export default function MentorMonitoringView({ interns = [], onNavigate, refresh
     fetchReceivedFeedback()
       .then((result) => setBlockers({ items: result.items || [], loading: false, error: '' }))
       .catch(() => setBlockers({ items: [], loading: false, error: 'Unable to load blocker reports.' }));
+
+    fetchMentorBlockers()
+      .then((res) => setAuthoritativeBlockers(res.items || []))
+      .catch(() => {});
+  };
+
+  const handleResolveBlocker = async (blockerId) => {
+    if (!blockerId) return;
+    setResolveBusy(true);
+    try {
+      await resolveMentorBlocker(blockerId, resolutionNotes);
+      setResolvingBlockerId(null);
+      setResolutionNotes('');
+      loadBlockers();
+    } catch (err) {
+      alert(err.message || 'Failed to resolve blocker.');
+    } finally {
+      setResolveBusy(false);
+    }
+  };
+
+  const handleGenerateReport = async () => {
+    const projId = selected?.project_id || (interns.find((i) => i.project_id)?.project_id);
+    if (!projId) {
+      alert('No active internship project found for generating report. Please ensure an active project is associated with your interns.');
+      return;
+    }
+    setGeneratingReport(true);
+    try {
+      const rep = await generateDailyReport(projId);
+      setActiveReport(rep);
+      setReportModalOpen(true);
+      fetchDailyReports(projId).then((res) => setPastReports(res.items || [])).catch(() => {});
+    } catch (err) {
+      alert(err.message || 'Failed to generate daily report.');
+    } finally {
+      setGeneratingReport(false);
+    }
   };
 
   useEffect(() => {
@@ -371,6 +584,38 @@ export default function MentorMonitoringView({ interns = [], onNavigate, refresh
 
   return (
     <div className="animate-fade-in" style={{ display: 'grid', gap: '0.9rem' }}>
+      {/* Daily Progress Report Trigger & Summary strip (§2) */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.6rem', flexWrap: 'wrap', padding: '.65rem .85rem', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <div>
+          <strong style={{ fontSize: '.88rem', color: '#0f172a' }}>Daily Progress &amp; Intern Oversight</strong>
+          <small style={{ display: 'block', fontSize: '.72rem', color: '#64748b' }}>Monitor daily completion, unblock intern tasks, and trigger AI progress summaries.</small>
+        </div>
+        <button
+          type="button"
+          onClick={handleGenerateReport}
+          disabled={generatingReport}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: '.35rem',
+            padding: '6px 14px', borderRadius: '8px', border: 0,
+            background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#fff',
+            fontSize: '.76rem', fontWeight: 600, cursor: generatingReport ? 'wait' : 'pointer',
+            boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)'
+          }}
+        >
+          <Sparkles size={14} />
+          {generatingReport ? 'Analyzing & Generating...' : "Generate Today's Progress Report"}
+        </button>
+      </div>
+
+      {reportModalOpen && activeReport && (
+        <DailyReportModal
+          report={activeReport}
+          pastReports={pastReports}
+          onClose={() => setReportModalOpen(false)}
+          onSelectPastReport={(r) => setActiveReport(r)}
+        />
+      )}
+
       {/* Summary strip (§2) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.55rem' }}>
         <SummaryTile label="Total interns" value={summary.total} />
@@ -652,8 +897,86 @@ export default function MentorMonitoringView({ interns = [], onNavigate, refresh
                 )}
               </Section>
 
-              {/* Blockers */}
-              <Section title="Blockers" icon={LifeBuoy}>
+              {/* Authoritative Blockers & Resolution */}
+              <Section
+                title={`Blockers (${authoritativeBlockers.filter(b => b.status === 'open').length} active)`}
+                icon={LifeBuoy}
+              >
+                {authoritativeBlockers.length > 0 && (
+                  <div style={{ display: 'grid', gap: '.5rem', marginBottom: '.6rem' }}>
+                    {authoritativeBlockers.map((b) => {
+                      const isOpen = b.status === 'open';
+                      const isResolving = resolvingBlockerId === b.id;
+                      return (
+                        <div key={b.id} style={{ border: isOpen ? '1px solid #fed7aa' : '1px solid #bbf7d0', background: isOpen ? '#fff7ed' : '#f0fdf4', borderRadius: 10, padding: '0.65rem 0.8rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                              <strong style={{ fontSize: '.82rem', color: isOpen ? '#c2410c' : '#15803d', textTransform: 'capitalize' }}>
+                                [{b.blocker_type || 'Technical'}] {b.task_title || 'General Task'}
+                              </strong>
+                              <span style={{ fontSize: '.7rem', color: '#64748b' }}>— {b.intern_name}</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                              <span style={{ padding: '2px 7px', borderRadius: '4px', fontSize: '.66rem', fontWeight: 700, background: isOpen ? '#ffedd5' : '#dcfce7', color: isOpen ? '#9a3412' : '#166534' }}>
+                                {isOpen ? 'Open Blocker' : 'Resolved'}
+                              </span>
+                              {isOpen && (
+                                <button
+                                  type="button"
+                                  onClick={() => setResolvingBlockerId(isResolving ? null : b.id)}
+                                  style={{ padding: '2px 8px', borderRadius: '6px', border: '1px solid #0284c7', background: '#fff', color: '#0284c7', fontSize: '.68rem', fontWeight: 600, cursor: 'pointer' }}
+                                >
+                                  {isResolving ? 'Cancel' : 'Resolve'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <p style={{ margin: '0.25rem 0 0', fontSize: '.78rem', color: isOpen ? '#7c2d12' : '#14532d', whiteSpace: 'pre-wrap' }}>
+                            {b.description}
+                          </p>
+
+                          {b.resolution_notes && (
+                            <div style={{ marginTop: '.3rem', padding: '.4rem .6rem', background: '#dcfce7', borderRadius: '6px', fontSize: '.72rem', color: '#166534' }}>
+                              <strong>Resolution Notes:</strong> {b.resolution_notes}
+                            </div>
+                          )}
+
+                          <small style={{ display: 'block', marginTop: '0.3rem', color: '#94a3b8', fontSize: '0.7rem' }}>
+                            Reported {formatDateTime(b.created_at)} {b.resolved_at ? `· Resolved ${formatDateTime(b.resolved_at)}` : ''}
+                          </small>
+
+                          {isResolving && (
+                            <div style={{ marginTop: '.5rem', padding: '.6rem', background: '#fff', borderRadius: '8px', border: '1px solid #cbd5e1', display: 'grid', gap: '.4rem' }}>
+                              <label style={{ fontSize: '.72rem', fontWeight: 600, color: '#334155' }}>Resolution Notes / Action Taken:</label>
+                              <textarea
+                                value={resolutionNotes}
+                                onChange={(e) => setResolutionNotes(e.target.value)}
+                                placeholder="E.g., Granted AWS IAM permission, unblocked API credentials, or clarified requirement..."
+                                style={{ width: '100%', padding: '4px 6px', fontSize: '.75rem', borderRadius: '6px', border: '1px solid #cbd5e1', minHeight: 50 }}
+                              />
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '.4rem' }}>
+                                <button type="button" onClick={() => setResolvingBlockerId(null)} style={{ padding: '3px 8px', fontSize: '.68rem', border: '1px solid #cbd5e1', background: '#fff', borderRadius: '4px' }}>Cancel</button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleResolveBlocker(b.id)}
+                                  disabled={resolveBusy}
+                                  style={{ padding: '3px 10px', fontSize: '.68rem', border: 0, background: '#16a34a', color: '#fff', borderRadius: '4px', fontWeight: 600, cursor: resolveBusy ? 'wait' : 'pointer' }}
+                                >
+                                  {resolveBusy ? 'Saving...' : 'Mark as Resolved'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Section>
+
+              {/* Feedback-based Blockers */}
+              <Section title="Intern Feedback Reports" icon={MessageSquare}>
                 {blockers.loading ? (
                   <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>Loading blockers…</p>
                 ) : blockersForIntern.length === 0 ? (
