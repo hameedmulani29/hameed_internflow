@@ -1,33 +1,46 @@
 import { useEffect, useState } from 'react';
 import {
+  AlertCircle,
   Calendar,
+  Check,
   Clock,
+  Download,
   Eye,
+  FileText,
   FolderKanban,
   GitBranch,
   Layers,
   ListTree,
   Play,
   Plus,
+  Send,
   Sliders,
   Sparkles,
   Trash2,
+  Upload,
+  X,
 } from 'lucide-react';
 import ConfirmationModal from '../../components/common/ConfirmationModal';
 import {
+  applyAIPlan,
   createChunk,
   createMasterTask,
   createMentorProject,
   deleteChunk,
   deleteMasterTask,
+  deleteProjectDocument,
   executeDistribution,
   executeSchedule,
   fetchChunks,
   fetchMentorProject,
   fetchMentorProjects,
+  fetchProjectDocuments,
+  previewAIPlan,
   previewDistribution,
   previewSchedule,
+  releaseDailyTasks,
   updateMentorProject,
+  uploadProjectDocument,
 } from '../../services/mentorshipFoundationService';
 
 const PROJECT_STATUSES = ['draft', 'active', 'completed', 'archived'];
@@ -296,6 +309,207 @@ function InternshipSelect() {
   );
 }
 
+
+function ProjectDocumentsSection({ projectId }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const loadDocs = () => {
+    setLoading(true);
+    fetchProjectDocuments(projectId)
+      .then((res) => setDocs(res.items || []))
+      .catch((err) => setError(err.message || 'Failed to load documents.'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadDocs();
+  }, [projectId]);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError('');
+    setSuccess('');
+    try {
+      await uploadProjectDocument(projectId, file);
+      setSuccess(`Uploaded "${file.name}" successfully!`);
+      loadDocs();
+    } catch (err) {
+      setError(err.message || 'Upload failed.');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleDelete = async (docId, fileName) => {
+    if (!window.confirm(`Delete document "${fileName}"?`)) return;
+    try {
+      await deleteProjectDocument(projectId, docId);
+      loadDocs();
+    } catch (err) {
+      setError(err.message || 'Failed to delete document.');
+    }
+  };
+
+  const formatSize = (bytes) => {
+    if (!bytes) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  return (
+    <div style={{ padding: '.6rem', background: 'rgba(255,255,255,0.6)', borderRadius: '8px', border: '1px solid var(--provider-border)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '.5rem', flexWrap: 'wrap', gap: '.4rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.35rem' }}>
+          <FileText size={15} style={{ color: 'var(--mentor-accent)' }} />
+          <strong style={{ fontSize: '.76rem', color: 'var(--mentor-text)' }}>Reference Materials &amp; Research Docs</strong>
+          <span style={{ fontSize: '.68rem', color: 'var(--provider-text-muted)' }}>({docs.length})</span>
+        </div>
+        <label style={{
+          display: 'inline-flex', alignItems: 'center', gap: '.3rem', padding: '3px 9px',
+          background: 'var(--mentor-accent)', color: '#fff', borderRadius: '6px', fontSize: '.68rem',
+          fontWeight: 600, cursor: uploading ? 'wait' : 'pointer', opacity: uploading ? 0.7 : 1
+        }}>
+          <Upload size={12} />
+          {uploading ? 'Uploading...' : 'Upload Doc / Brief'}
+          <input type="file" onChange={handleUpload} disabled={uploading} style={{ display: 'none' }} accept=".pdf,.doc,.docx,.txt,.md,.json,.zip" />
+        </label>
+      </div>
+
+      {error && <p style={{ color: '#b91c1c', fontSize: '.7rem', margin: '0 0 .4rem' }}>{error}</p>}
+      {success && <p style={{ color: '#047857', fontSize: '.7rem', margin: '0 0 .4rem' }}>{success}</p>}
+
+      {docs.length === 0 && !loading && (
+        <p style={{ fontSize: '.72rem', color: 'var(--provider-text-muted)', margin: 0, fontStyle: 'italic' }}>
+          No reference documents uploaded yet. Upload project briefs or requirements to guide AI plan generation and assigned interns.
+        </p>
+      )}
+
+      {docs.length > 0 && (
+        <div style={{ display: 'grid', gap: '.35rem' }}>
+          {docs.map((d) => (
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', background: '#fff', borderRadius: '6px', border: '1px solid var(--provider-border)', fontSize: '.72rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', minWidth: 0, overflow: 'hidden' }}>
+                <FileText size={13} style={{ color: 'var(--provider-text-muted)', flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, color: 'var(--mentor-text)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{d.file_name}</span>
+                <span style={{ color: 'var(--provider-text-muted)', fontSize: '.65rem', flexShrink: 0 }}>({formatSize(d.file_size)})</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', flexShrink: 0 }}>
+                <span style={{ fontSize: '.65rem', color: 'var(--provider-text-muted)' }}>{d.uploaded_at ? String(d.uploaded_at).slice(0, 10) : ''}</span>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(d.id, d.file_name)}
+                  style={{ border: 0, background: 'transparent', color: '#b91c1c', cursor: 'pointer', padding: '2px', display: 'flex' }}
+                  title="Delete document"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AIPlanModal({ project, plan, onClose, onApplied }) {
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleApply = async () => {
+    setApplying(true);
+    setError('');
+    try {
+      await applyAIPlan(project.id, plan);
+      onApplied();
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to apply plan.');
+      setApplying(false);
+    }
+  };
+
+  const milestones = plan?.milestones || [];
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+      <div style={{ background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '750px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
+        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--provider-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+            <Sparkles size={18} style={{ color: 'var(--mentor-accent)' }} />
+            <div>
+              <strong style={{ fontSize: '.95rem', color: 'var(--mentor-text)' }}>AI Project Plan Proposal</strong>
+              <small style={{ display: 'block', fontSize: '.7rem', color: 'var(--provider-text-muted)' }}>
+                {project.title} · {plan.ai_status === 'fallback' ? 'Deterministic Project Template' : 'Gemini 2.0 Flash Decomposition'}
+              </small>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: 'var(--provider-text-muted)' }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ padding: '1rem 1.25rem', overflowY: 'auto', flex: 1, display: 'grid', gap: '.8rem' }}>
+          {error && <p style={{ color: '#b91c1c', fontSize: '.75rem', margin: 0 }}>{error}</p>}
+          <p style={{ fontSize: '.76rem', color: 'var(--provider-text-soft)', margin: 0 }}>
+            Below is the proposed multi-milestone decomposition for this project. Reviewing will import these <strong>{milestones.length} milestones</strong> and their associated tasks into your project roadmap.
+          </p>
+
+          <div style={{ display: 'grid', gap: '.7rem' }}>
+            {milestones.map((m, idx) => (
+              <div key={idx} style={{ padding: '.75rem', background: 'rgba(248, 250, 252, 0.8)', borderRadius: '8px', border: '1px solid var(--provider-border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '.3rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                    <span style={{ fontSize: '.7rem', fontWeight: 800, color: 'var(--mentor-accent)' }}>Milestone {idx + 1}:</span>
+                    <strong style={{ fontSize: '.82rem', color: 'var(--mentor-text)' }}>{m.title}</strong>
+                  </div>
+                  <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
+                    <span style={{ fontSize: '.65rem', padding: '1px 6px', borderRadius: '4px', background: m.priority === 'high' ? '#fee2e2' : '#f1f5f9', color: m.priority === 'high' ? '#991b1b' : '#475569', fontWeight: 600 }}>{m.priority}</span>
+                    <span style={{ fontSize: '.68rem', color: 'var(--provider-text-muted)', fontWeight: 600 }}>{m.estimated_hours}h</span>
+                  </div>
+                </div>
+                {m.description && <p style={{ fontSize: '.72rem', color: 'var(--provider-text-soft)', margin: '0 0 .5rem' }}>{m.description}</p>}
+
+                {m.chunks && m.chunks.length > 0 && (
+                  <div style={{ display: 'grid', gap: '.3rem', marginTop: '.4rem', paddingLeft: '.6rem', borderLeft: '2px solid rgba(79, 70, 229, 0.2)' }}>
+                    {m.chunks.map((c, cIdx) => (
+                      <div key={cIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '.7rem', padding: '3px 6px', background: '#fff', borderRadius: '4px', border: '1px solid rgba(0,0,0,0.05)' }}>
+                        <span style={{ fontWeight: 500, color: 'var(--mentor-text)' }}>{c.title}</span>
+                        <div style={{ display: 'flex', gap: '.3rem', alignItems: 'center' }}>
+                          <span style={{ fontSize: '.62rem', color: 'var(--provider-text-muted)' }}>{c.estimated_hours}h</span>
+                          <span style={{ fontSize: '.6rem', color: 'var(--provider-text-soft)', textTransform: 'capitalize' }}>{c.priority}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ padding: '.8rem 1.25rem', borderTop: '1px solid var(--provider-border)', display: 'flex', justifyContent: 'flex-end', gap: '.6rem', background: '#f8fafc', borderRadius: '0 0 12px 12px' }}>
+          <button type="button" onClick={onClose} disabled={applying} style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--provider-border)', background: '#fff', fontSize: '.75rem', fontWeight: 600, cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button type="button" onClick={handleApply} disabled={applying} style={{ display: 'flex', alignItems: 'center', gap: '.35rem', padding: '6px 16px', borderRadius: '6px', border: 0, background: 'var(--mentor-accent)', color: '#fff', fontSize: '.75rem', fontWeight: 600, cursor: applying ? 'wait' : 'pointer' }}>
+            <Sparkles size={13} />
+            {applying ? 'Applying Plan...' : 'Accept & Apply Plan'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProjectCard({ project, planStatus, isExpanded, onToggle, onChanged }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState('');
@@ -314,6 +528,11 @@ function ProjectCard({ project, planStatus, isExpanded, onToggle, onChanged }) {
   const [datesEditing, setDatesEditing] = useState(false);
   const [startDateInput, setStartDateInput] = useState(project.start_date || '');
   const [endDateInput, setEndDateInput] = useState(project.end_date || '');
+
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiPlan, setAiPlan] = useState(null);
+  const [releaseBusy, setReleaseBusy] = useState(false);
+  const [releaseMsg, setReleaseMsg] = useState('');
 
   useEffect(() => {
     if (!isExpanded) return undefined;
@@ -431,6 +650,37 @@ function ProjectCard({ project, planStatus, isExpanded, onToggle, onChanged }) {
     }
   };
 
+  const handleGenerateAIPlan = async () => {
+    setAiLoading(true);
+    setError('');
+    try {
+      const plan = await previewAIPlan(project.id);
+      setAiPlan(plan);
+    } catch (err) {
+      setError(err?.message || 'Failed to generate AI plan.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleReleaseDaily = async () => {
+    setReleaseBusy(true);
+    setError('');
+    setReleaseMsg('');
+    try {
+      const res = await releaseDailyTasks(project.id);
+      setReleaseMsg(`Daily Task Release: ${res.released_count} task(s) active for ${res.target_date}.`);
+      const fresh = await fetchMentorProject(project.id);
+      setDetail(fresh);
+      onChanged?.();
+    } catch (err) {
+      setError(err?.message || 'Failed to release daily tasks.');
+    } finally {
+      setReleaseBusy(false);
+    }
+  };
+
+
   return (
     <div style={{ border: '1px solid var(--provider-border)', borderRadius: '10px', overflow: 'hidden' }}>
       <button
@@ -474,6 +724,61 @@ function ProjectCard({ project, planStatus, isExpanded, onToggle, onChanged }) {
                   {detail.deliverable && <span><strong>Deliverable:</strong> {detail.deliverable}</span>}
                   {detail.description && <span><strong>Description:</strong> {detail.description}</span>}
                 </div>
+              )}
+
+              {/* Project Documents & Research Material */}
+              <ProjectDocumentsSection projectId={project.id} />
+
+              {/* AI Plan & Daily Release Action Strip */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap', padding: '.55rem .7rem', background: 'rgba(255,255,255,0.7)', borderRadius: '8px', border: '1px solid var(--provider-border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                  <Sparkles size={15} style={{ color: 'var(--mentor-accent)' }} />
+                  <span style={{ fontSize: '.76rem', fontWeight: 700, color: 'var(--mentor-text)' }}>AI Work Planning &amp; Daily Delivery</span>
+                </div>
+                <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={handleGenerateAIPlan}
+                    disabled={aiLoading}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '.3rem',
+                      padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--mentor-accent)',
+                      background: 'rgba(79, 70, 229, 0.08)', color: 'var(--mentor-accent)',
+                      fontSize: '.72rem', fontWeight: 600, cursor: aiLoading ? 'wait' : 'pointer'
+                    }}
+                  >
+                    <Sparkles size={12} />
+                    {aiLoading ? 'Decomposing with AI...' : 'Generate Plan with AI'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReleaseDaily}
+                    disabled={releaseBusy}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '.3rem',
+                      padding: '4px 10px', borderRadius: '6px', border: '1px solid #059669',
+                      background: 'rgba(5, 150, 105, 0.08)', color: '#059669',
+                      fontSize: '.72rem', fontWeight: 600, cursor: releaseBusy ? 'wait' : 'pointer'
+                    }}
+                  >
+                    <Play size={12} />
+                    {releaseBusy ? 'Releasing...' : "Release Today's Tasks"}
+                  </button>
+                </div>
+              </div>
+
+              {releaseMsg && <p style={{ color: '#047857', background: '#ecfdf5', padding: '.5rem', borderRadius: '6px', fontSize: '.75rem', fontWeight: 600, margin: 0 }}>{releaseMsg}</p>}
+
+              {aiPlan && (
+                <AIPlanModal
+                  project={project}
+                  plan={aiPlan}
+                  onClose={() => setAiPlan(null)}
+                  onApplied={() => {
+                    fetchMentorProject(project.id).then(setDetail).catch(() => {});
+                    onChanged?.();
+                  }}
+                />
               )}
 
               {/* Roadmap progress: milestone (master task) completion from real chunk status */}
