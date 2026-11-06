@@ -36,6 +36,7 @@ import TaskSubmitModal from '../../components/intern/TaskSubmitModal';
 import { fetchUnreadFeedback, markFeedbackAsRead, submitMentorFeedback } from '../../services/mentorFeedbackService';
 import { fetchMyWeeklyReports } from '../../services/phase20Service';
 import FeedbackNotificationModal from '../../components/intern/FeedbackNotificationModal';
+import { reportInternBlocker } from '../../services/mentorshipFoundationService';
 import '../../styles/InternWorkspace.css';
 
 function formatMinutes(totalMinutes) {
@@ -281,8 +282,18 @@ export default function InternDashboardPage({ onNavigate }) {
       blockerDraft.details.trim(),
     ];
     try {
+      // 1. Report to authoritative blockers system
+      const bType = blockerDraft.type?.startsWith('tech') ? 'technical' : blockerDraft.type === 'missing_access' ? 'access' : blockerDraft.type === 'dependency_blocked' ? 'dependency' : 'other';
+      await reportInternBlocker({
+        taskId: taskObj ? taskObj.id : null,
+        projectId: taskObj?.project_id || null,
+        blockerType: bType,
+        description: lines.join('\n'),
+      }).catch(() => {});
+
+      // 2. Also send to feedback channel for backward compatibility
       await submitMentorFeedback({ feedbackType: 'other', rating: null, message: lines.join('\n') });
-      setBlockerMessage({ tone: 'success', text: 'Blocker sent to your mentor — they will see it in their Intern Feedback queue.' });
+      setBlockerMessage({ tone: 'success', text: 'Blocker sent to your mentor — they will see it in their monitoring queue.' });
       setBlockerDraft({ type: 'technical_issue', details: '', affected: '' });
       setTimeout(() => {
         setBlockerModalOpen(false);
