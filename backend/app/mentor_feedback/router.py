@@ -156,8 +156,6 @@ async def submit_feedback(payload: InternFeedbackInput, token=Depends(require_ro
 def received_feedback(token=Depends(require_roles('mentor'))):
     mentor = int(token['sub'])
     with get_db() as db:
-        seed_mentor_demo_data(db, mentor)
-        db.commit()
         rows = db.execute(
             """SELECT f.id, f.feedback_type, f.rating, f.message, f.status, f.created_at,
                       u.full_name AS intern_name, i.title AS internship_title
